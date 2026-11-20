@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cedar &amp; Slate — 8th Grade Homeschool Hub</title>
+  <title>Sunshine Homeschool — Learning Studio</title>
 
   <!-- Google Fonts: Plus Jakarta Sans & Lora -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -108,7 +108,7 @@
       </p>
       <div class="bg-slate-50 rounded-xl p-4 mb-4 border border-slate-200">
         <label class="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Parent PIN Required to Resume</label>
-        <input type="password" id="unlock-pin-input" maxlength="8" placeholder="Enter PIN"
+        <input type="password" id="unlock-pin-input" maxlength="8" placeholder="Enter Parent PIN"
           class="w-full text-center text-xl tracking-widest font-bold px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-sage-600 focus:border-sage-600 outline-none" />
         <p id="unlock-pin-error" class="text-red-600 text-xs mt-2 hidden">Incorrect Parent PIN.</p>
       </div>
@@ -126,9 +126,9 @@
     <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-lg font-bold text-slate-900">Parent / Teacher Access</h3>
-        <button onclick="closeParentPinModal()" class="text-slate-400 hover:text-slate-600">&times;</button>
+        <button onclick="closeParentPinModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
-      <p class="text-sm text-slate-600 mb-4">Enter your Parent PIN to manage lessons, build quizzes, and review grades. <span class="text-xs text-slate-400">(Default PIN: 1234)</span></p>
+      <p class="text-sm text-slate-600 mb-4">Enter your Parent PIN to manage students, lessons, quizzes, and grades. <span class="text-xs text-slate-400">(Default PIN: 1234)</span></p>
       <input type="password" id="parent-login-pin" maxlength="8" placeholder="••••"
         onkeydown="if(event.key==='Enter') verifyParentLogin()"
         class="w-full text-center text-2xl tracking-widest font-bold px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-sage-600 outline-none mb-3" />
@@ -146,12 +146,12 @@
   <header class="bg-white border-b border-slate-200/80 sticky top-0 z-30 no-print">
     <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-sage-600 text-white flex items-center justify-center font-serif font-bold text-lg shadow-sm">
-          C
+        <div class="w-9 h-9 rounded-xl bg-amberwarm-600 text-white flex items-center justify-center font-serif font-bold text-lg shadow-sm">
+          ☀
         </div>
         <div>
-          <h1 class="font-bold text-slate-900 leading-tight tracking-tight">Cedar &amp; Slate</h1>
-          <p class="text-xs text-slate-500">8th Grade Learning Studio</p>
+          <h1 class="font-bold text-slate-900 leading-tight tracking-tight">Sunshine Homeschool</h1>
+          <p class="text-xs text-slate-500">Learning &amp; Assessment Studio</p>
         </div>
       </div>
 
@@ -194,7 +194,7 @@
     // =========================================================================
     // 1. FIREBASE CONFIGURATION (PASTE YOUR FREE FIREBASE KEYS HERE)
     // =========================================================================
-    const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyDscZ7MgKhibd8NTCCm4syElUaTj9o3KTk",
     authDomain: "sunshine-homeschool.firebaseapp.com",
     databaseURL: "https://sunshine-homeschool-default-rtdb.firebaseio.com",
@@ -212,7 +212,7 @@
       try {
         const app = initializeApp(firebaseConfig);
         db = getDatabase(app);
-        dbRef = ref(db, 'homeschool_data_v1');
+        dbRef = ref(db, 'sunshine_homeschool_v2');
       } catch (err) {
         console.error("Firebase init error:", err);
       }
@@ -223,15 +223,23 @@
     // =========================================================================
     const DEFAULT_STATE = {
       settings: {
-        studentName: "Maya",
-        gradeLevel: "8th Grade",
+        schoolName: "Sunshine Homeschool",
         schoolYear: "2026–2027",
         parentPin: "1234",
-        subjects: ["Pre-Algebra", "Physical Science", "U.S. History", "English & Literature", "Spanish I"]
+        subjects: ["Pre-Algebra", "Physical Science", "U.S. History", "English & Literature", "Spanish I"],
+        students: [
+          {
+            id: "stu_isabel",
+            name: "Isabel",
+            gradeLevel: "8th Grade",
+            pin: "2468"
+          }
+        ]
       },
       lessons: [
         {
           id: "les_101",
+          studentId: "stu_isabel",
           subject: "Pre-Algebra",
           title: "Solving Multi-Step Linear Equations & Slope",
           date: "2026-11-20",
@@ -245,11 +253,11 @@
             options: ["9", "-4", "4", "-9"],
             correctIndex: 1
           },
-          completedByStudent: false,
-          completedAt: null
+          completedBy: {}
         },
         {
           id: "les_102",
+          studentId: "stu_isabel",
           subject: "Physical Science",
           title: "Newton's Second Law: Force, Mass & Acceleration",
           date: "2026-11-20",
@@ -263,13 +271,15 @@
             options: ["It stays the same", "It is cut in half", "It doubles", "It drops to zero"],
             correctIndex: 2
           },
-          completedByStudent: true,
-          completedAt: "2026-11-19T14:20:00.000Z"
+          completedBy: {
+            stu_isabel: "2026-11-19T14:20:00.000Z"
+          }
         }
       ],
       assignments: [
         {
           id: "asg_201",
+          studentId: "stu_isabel",
           subject: "Pre-Algebra",
           title: "Linear Equations & Slope Practice Set",
           type: "Homework",
@@ -310,6 +320,7 @@
         },
         {
           id: "asg_202",
+          studentId: "stu_isabel",
           subject: "Physical Science",
           title: "Forces & Motion Checkpoint Quiz (Strict Mode)",
           type: "Quiz",
@@ -342,26 +353,33 @@
           ]
         }
       ],
+      // Submissions keyed by `${studentId}_${assignmentId}`
       submissions: {}
     };
 
     // App Runtime State
     let appState = loadLocalState();
-    let currentRole = "student"; // 'student' | 'parent'
-    let studentTab = "today";    // 'today' | 'todo' | 'completed' | 'grades'
+    let currentRole = "student";        // 'student' | 'parent'
+    let authenticatedStudentId = null;  // null until student enters their private PIN
+    let loginSelectedStudentId = appState.settings.students[0]?.id || "";
+    let loginErrorMsg = "";
+
+    let studentTab = "today";           // 'today' | 'todo' | 'completed' | 'grades'
     let selectedSubject = "All";
-    let parentTab = "overview";  // 'overview' | 'create-lesson' | 'create-assignment' | 'gradebook' | 'settings'
+    let parentTab = "overview";         // 'overview' | 'create-lesson' | 'create-assignment' | 'gradebook' | 'students'
+    let parentStudentFilter = "All";
 
     // Active Viewers
     let activeLessonId = null;
     let activeAssignmentId = null;
-    let activeReviewSubmissionId = null;
-    let printableRecord = null; // { kind: 'lesson'|'submission', id: '...' }
+    let activeReviewKey = null;         // `${studentId}_${assignmentId}`
+    let printableRecord = null;         // { kind: 'lesson'|'submission', id: '...', studentId: '...' }
 
     // Strict Test Mode Runtime State
     let strictSession = {
       active: false,
       assignmentId: null,
+      studentId: null,
       unlockedStarted: false,
       pausedLocked: false,
       violations: []
@@ -372,14 +390,14 @@
     // =========================================================================
     function loadLocalState() {
       try {
-        const saved = localStorage.getItem("cedar_slate_state_v1");
+        const saved = localStorage.getItem("sunshine_homeschool_state_v2");
         if (saved) return JSON.parse(saved);
       } catch (e) {}
       return structuredClone(DEFAULT_STATE);
     }
 
     function saveState() {
-      localStorage.setItem("cedar_slate_state_v1", JSON.stringify(appState));
+      localStorage.setItem("sunshine_homeschool_state_v2", JSON.stringify(appState));
       if (isFirebaseConfigured && dbRef) {
         set(dbRef, appState).catch(err => console.error("Firebase write failed:", err));
       }
@@ -395,18 +413,49 @@
         const remoteData = snapshot.val();
         if (remoteData) {
           appState = {
-            settings: { ...DEFAULT_STATE.settings, ...(remoteData.settings || {}) },
+            settings: {
+              ...DEFAULT_STATE.settings,
+              ...(remoteData.settings || {}),
+              students: remoteData.settings?.students || DEFAULT_STATE.settings.students
+            },
             lessons: remoteData.lessons || [],
             assignments: remoteData.assignments || [],
             submissions: remoteData.submissions || {}
           };
-          localStorage.setItem("cedar_slate_state_v1", JSON.stringify(appState));
+          if (!loginSelectedStudentId && appState.settings.students.length) {
+            loginSelectedStudentId = appState.settings.students[0].id;
+          }
+          localStorage.setItem("sunshine_homeschool_state_v2", JSON.stringify(appState));
           render();
         } else {
-          // Initialize empty Firebase database with starter content
           set(dbRef, appState);
         }
       });
+    }
+
+    // Helper getters
+    function getStudentById(id) {
+      return appState.settings.students.find(s => s.id === id) || appState.settings.students[0];
+    }
+
+    function getSubKey(studentId, assignmentId) {
+      return `${studentId}_${assignmentId}`;
+    }
+
+    function isLessonVisibleToStudent(lesson, studentId) {
+      return !lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId;
+    }
+
+    function isAssignmentVisibleToStudent(asg, studentId) {
+      return !asg.studentId || asg.studentId === "ALL" || asg.studentId === studentId;
+    }
+
+    function isLessonCompletedBy(lesson, studentId) {
+      return Boolean(lesson.completedBy && lesson.completedBy[studentId]);
+    }
+
+    function isCheckPassedBy(lesson, studentId) {
+      return Boolean(lesson.checkPassedBy && lesson.checkPassedBy[studentId]);
     }
 
     // =========================================================================
@@ -419,7 +468,6 @@
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
 
-      // Basic Markdown formatting (Headings, Bold, Bullet points, Line breaks)
       safe = safe.replace(/^### (.*$)/gim, '<h3 class="text-lg font-bold text-slate-900 mt-5 mb-2">$1</h3>');
       safe = safe.replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold text-slate-900 mt-6 mb-2">$1</h2>');
       safe = safe.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
@@ -457,15 +505,16 @@
       const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       strictSession.violations.push(`${timestamp} — ${reason}`);
 
-      // Persist violation log immediately to draft submission
-      const sub = appState.submissions[strictSession.assignmentId] || {
+      const subKey = getSubKey(strictSession.studentId, strictSession.assignmentId);
+      const sub = appState.submissions[subKey] || {
+        studentId: strictSession.studentId,
         assignmentId: strictSession.assignmentId,
         status: "in_progress",
         answers: {},
         violations: []
       };
       sub.violations = [...strictSession.violations];
-      appState.submissions[strictSession.assignmentId] = sub;
+      appState.submissions[subKey] = sub;
       saveState();
 
       document.getElementById("focus-lock-reason").textContent =
@@ -489,7 +538,6 @@
       }
     });
 
-    // Block Right-Click, Copy, Cut, Paste during Strict Test Mode
     ["contextmenu", "copy", "cut", "paste"].forEach(evtName => {
       document.addEventListener(evtName, (e) => {
         if (strictSession.active && strictSession.unlockedStarted) {
@@ -508,6 +556,7 @@
       }
       strictSession.active = true;
       strictSession.assignmentId = assignmentId;
+      strictSession.studentId = authenticatedStudentId;
       strictSession.unlockedStarted = true;
       strictSession.pausedLocked = false;
       render();
@@ -529,15 +578,55 @@
     };
 
     function exitStrictSessionCleanup() {
-      strictSession = { active: false, assignmentId: null, unlockedStarted: false, pausedLocked: false, violations: [] };
+      strictSession = { active: false, assignmentId: null, studentId: null, unlockedStarted: false, pausedLocked: false, violations: [] };
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
       }
     }
 
     // =========================================================================
-    // 6. ROLE SWITCHING & NAVIGATION ACTIONS
+    // 6. AUTHENTICATION & ROLE SWITCHING (STUDENT PIN + PARENT PIN)
     // =========================================================================
+    window.selectStudentForLogin = function(stuId) {
+      loginSelectedStudentId = stuId;
+      loginErrorMsg = "";
+      render();
+      setTimeout(() => {
+        const input = document.getElementById("student-login-pin-input");
+        if (input) input.focus();
+      }, 30);
+    };
+
+    window.verifyStudentLogin = function() {
+      const targetId = loginSelectedStudentId || appState.settings.students[0]?.id;
+      const student = getStudentById(targetId);
+      const enteredPin = (document.getElementById("student-login-pin-input")?.value || "").trim();
+
+      if (!student) return;
+      if (enteredPin === String(student.pin)) {
+        authenticatedStudentId = student.id;
+        loginErrorMsg = "";
+        studentTab = "today";
+        selectedSubject = "All";
+        activeLessonId = null;
+        activeAssignmentId = null;
+        render();
+      } else {
+        loginErrorMsg = "Incorrect Student PIN. Ask your teacher if you forgot your PIN.";
+        render();
+      }
+    };
+
+    window.lockStudentSession = function() {
+      exitStrictSessionCleanup();
+      authenticatedStudentId = null;
+      activeLessonId = null;
+      activeAssignmentId = null;
+      printableRecord = null;
+      loginErrorMsg = "";
+      render();
+    };
+
     window.openParentPinModal = function() {
       if (currentRole === "parent") return;
       document.getElementById("parent-login-pin").value = "";
@@ -571,7 +660,7 @@
       currentRole = "student";
       activeLessonId = null;
       activeAssignmentId = null;
-      activeReviewSubmissionId = null;
+      activeReviewKey = null;
       printableRecord = null;
       updateRoleButtons();
       render();
@@ -605,7 +694,7 @@
 
     window.setParentTab = function(tab) {
       parentTab = tab;
-      activeReviewSubmissionId = null;
+      activeReviewKey = null;
       printableRecord = null;
       render();
     };
@@ -630,7 +719,8 @@
         return;
       }
       if (Number(selected.value) === lesson.checkQuestion.correctIndex) {
-        lesson.checkPassed = true;
+        if (!lesson.checkPassedBy) lesson.checkPassedBy = {};
+        lesson.checkPassedBy[authenticatedStudentId] = true;
         saveState();
       } else {
         feedbackEl.textContent = "Not quite — review the lesson notes above and try again!";
@@ -640,9 +730,9 @@
 
     window.markLessonComplete = function(lessonId) {
       const lesson = appState.lessons.find(l => l.id === lessonId);
-      if (lesson) {
-        lesson.completedByStudent = true;
-        lesson.completedAt = new Date().toISOString();
+      if (lesson && authenticatedStudentId) {
+        if (!lesson.completedBy) lesson.completedBy = {};
+        lesson.completedBy[authenticatedStudentId] = new Date().toISOString();
         saveState();
       }
     };
@@ -654,11 +744,13 @@
       printableRecord = null;
 
       if (asg && asg.strictMode) {
-        const existingSub = appState.submissions[assignmentId];
+        const subKey = getSubKey(authenticatedStudentId, assignmentId);
+        const existingSub = appState.submissions[subKey];
         if (!existingSub || existingSub.status === "in_progress") {
           strictSession = {
             active: true,
             assignmentId: assignmentId,
+            studentId: authenticatedStudentId,
             unlockedStarted: false,
             pausedLocked: false,
             violations: existingSub?.violations || []
@@ -685,8 +777,10 @@
     window.saveAssignmentProgress = function(assignmentId) {
       const asg = appState.assignments.find(a => a.id === assignmentId);
       const answers = collectCurrentAnswers(asg);
-      appState.submissions[assignmentId] = {
-        ...(appState.submissions[assignmentId] || {}),
+      const subKey = getSubKey(authenticatedStudentId, assignmentId);
+      appState.submissions[subKey] = {
+        ...(appState.submissions[subKey] || {}),
+        studentId: authenticatedStudentId,
         assignmentId,
         status: "in_progress",
         answers,
@@ -718,7 +812,6 @@
             questionScores[q.id] = 0;
           }
         } else {
-          // Flag fill-in-the-blank & open-ended for parent review (pre-fill exact match if fill-in-the-blank)
           needsManualReview = true;
           if (q.type === "fill" && q.correctAnswer && studentAns.toLowerCase() === q.correctAnswer.trim().toLowerCase()) {
             questionScores[q.id] = pts;
@@ -729,8 +822,10 @@
         }
       });
 
-      const existingSub = appState.submissions[assignmentId] || {};
-      appState.submissions[assignmentId] = {
+      const subKey = getSubKey(authenticatedStudentId, assignmentId);
+      const existingSub = appState.submissions[subKey] || {};
+      appState.submissions[subKey] = {
+        studentId: authenticatedStudentId,
         assignmentId,
         status: needsManualReview ? "needs_review" : "graded",
         answers,
@@ -747,7 +842,7 @@
     };
 
     // =========================================================================
-    // 8. PARENT BUILDER, GRADING & BACKUP EXPORT ACTIONS
+    // 8. PARENT BUILDER, STUDENT PIN MANAGEMENT, GRADING & BACKUPS
     // =========================================================================
     let builderQuestions = [
       { id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }
@@ -794,6 +889,7 @@
 
     window.publishNewLesson = function(e) {
       e.preventDefault();
+      const studentId = document.getElementById("les_student").value;
       const subject = document.getElementById("les_subject").value;
       const title = document.getElementById("les_title").value.trim();
       const date = document.getElementById("les_date").value;
@@ -805,6 +901,7 @@
 
       const newLesson = {
         id: "les_" + Date.now(),
+        studentId,
         subject,
         title,
         date,
@@ -823,8 +920,7 @@
           ],
           correctIndex: Number(document.getElementById("les_check_correct").value)
         },
-        completedByStudent: false,
-        completedAt: null
+        completedBy: {}
       };
 
       appState.lessons.unshift(newLesson);
@@ -843,6 +939,7 @@
 
       const newAsg = {
         id: "asg_" + Date.now(),
+        studentId: document.getElementById("asg_student").value,
         subject: document.getElementById("asg_subject").value,
         title: document.getElementById("asg_title").value.trim(),
         type: document.getElementById("asg_type").value,
@@ -864,14 +961,16 @@
         appState.lessons = appState.lessons.filter(l => l.id !== id);
       } else {
         appState.assignments = appState.assignments.filter(a => a.id !== id);
-        delete appState.submissions[id];
+        Object.keys(appState.submissions).forEach(k => {
+          if (k.endsWith("_" + id)) delete appState.submissions[k];
+        });
       }
       saveState();
     };
 
-    window.saveParentGradeReview = function(assignmentId) {
-      const asg = appState.assignments.find(a => a.id === assignmentId);
-      const sub = appState.submissions[assignmentId];
+    window.saveParentGradeReview = function(subKey) {
+      const sub = appState.submissions[subKey];
+      const asg = appState.assignments.find(a => a.id === sub.assignmentId);
       let newEarned = 0;
 
       asg.questions.forEach(q => {
@@ -885,20 +984,65 @@
       sub.parentFeedback = document.getElementById("grade_parent_feedback").value.trim();
       sub.status = "graded";
       sub.gradedAt = new Date().toISOString();
-      activeReviewSubmissionId = null;
+      activeReviewKey = null;
       saveState();
     };
 
-    window.saveSettings = function(e) {
+    // Student Profile & PIN CRUD
+    window.addNewStudent = function(e) {
       e.preventDefault();
-      appState.settings.studentName = document.getElementById("set_student_name").value.trim() || "Student";
+      const name = document.getElementById("new_stu_name").value.trim();
+      const gradeLevel = document.getElementById("new_stu_grade").value.trim() || "8th Grade";
+      const pin = document.getElementById("new_stu_pin").value.trim();
+      if (!name || pin.length < 4) {
+        alert("Please enter a student name and a PIN that is 4 to 8 digits long.");
+        return;
+      }
+      appState.settings.students.push({
+        id: "stu_" + Date.now(),
+        name,
+        gradeLevel,
+        pin
+      });
+      saveState();
+    };
+
+    window.updateStudentPinAndInfo = function(stuId) {
+      const stu = appState.settings.students.find(s => s.id === stuId);
+      if (!stu) return;
+      const newName = document.getElementById(`edit_stu_name_${stuId}`).value.trim();
+      const newGrade = document.getElementById(`edit_stu_grade_${stuId}`).value.trim();
+      const newPin = document.getElementById(`edit_stu_pin_${stuId}`).value.trim();
+      if (newPin.length < 4) {
+        alert("Student PIN must be at least 4 characters.");
+        return;
+      }
+      if (newName) stu.name = newName;
+      if (newGrade) stu.gradeLevel = newGrade;
+      stu.pin = newPin;
+      saveState();
+      alert(`Updated ${stu.name}'s profile and PIN!`);
+    };
+
+    window.removeStudent = function(stuId) {
+      if (appState.settings.students.length <= 1) {
+        alert("You must have at least one student profile.");
+        return;
+      }
+      if (!confirm("Remove this student profile?")) return;
+      appState.settings.students = appState.settings.students.filter(s => s.id !== stuId);
+      saveState();
+    };
+
+    window.saveGeneralSettings = function(e) {
+      e.preventDefault();
       appState.settings.schoolYear = document.getElementById("set_school_year").value.trim() || "2026–2027";
       const newPin = document.getElementById("set_parent_pin").value.trim();
       if (newPin.length >= 4) appState.settings.parentPin = newPin;
       const rawSubj = document.getElementById("set_subjects").value;
       appState.settings.subjects = rawSubj.split(",").map(s => s.trim()).filter(Boolean);
       saveState();
-      alert("Settings saved!");
+      alert("Sunshine Homeschool settings saved!");
     };
 
     window.exportJSONBackup = function() {
@@ -906,34 +1050,36 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `homeschool-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `sunshine-homeschool-backup-${new Date().toISOString().slice(0,10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
     };
 
     window.exportGradesCSV = function() {
-      const rows = [["Subject", "Assignment Title", "Type", "Due Date", "Status", "Earned Points", "Total Points", "Percentage", "Strict Violations"]];
-      appState.assignments.forEach(asg => {
-        const sub = appState.submissions[asg.id];
-        const status = sub ? sub.status : "Not Started";
-        const earned = sub && sub.earnedPoints !== undefined ? sub.earnedPoints : "";
-        const total = asg.questions.reduce((acc, q) => acc + Number(q.points || 0), 0);
-        const pct = (sub && sub.earnedPoints !== undefined && total > 0) ? Math.round((sub.earnedPoints / total) * 100) + "%" : "";
-        const viol = sub && sub.violations ? sub.violations.length : 0;
-        rows.push([asg.subject, `"${asg.title.replace(/"/g, '""')}"`, asg.type, asg.dueDate, status, earned, total, pct, viol]);
+      const rows = [["Student", "Subject", "Assignment Title", "Type", "Due Date", "Status", "Earned Points", "Total Points", "Percentage", "Strict Violations"]];
+      appState.settings.students.forEach(stu => {
+        appState.assignments.filter(a => isAssignmentVisibleToStudent(a, stu.id)).forEach(asg => {
+          const sub = appState.submissions[getSubKey(stu.id, asg.id)];
+          const status = sub ? sub.status : "Not Started";
+          const earned = sub && sub.earnedPoints !== undefined ? sub.earnedPoints : "";
+          const total = asg.questions.reduce((acc, q) => acc + Number(q.points || 0), 0);
+          const pct = (sub && sub.earnedPoints !== undefined && total > 0) ? Math.round((sub.earnedPoints / total) * 100) + "%" : "";
+          const viol = sub && sub.violations ? sub.violations.length : 0;
+          rows.push([`"${stu.name}"`, asg.subject, `"${asg.title.replace(/"/g, '""')}"`, asg.type, asg.dueDate, status, earned, total, pct, viol]);
+        });
       });
       const csvContent = rows.map(r => r.join(",")).join("\n");
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `homeschool-gradebook-${new Date().toISOString().slice(0,10)}.csv`;
+      a.download = `sunshine-homeschool-gradebook-${new Date().toISOString().slice(0,10)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     };
 
-    window.openPrintablePortfolio = function(kind, id) {
-      printableRecord = { kind, id };
+    window.openPrintablePortfolio = function(kind, id, studentId) {
+      printableRecord = { kind, id, studentId: studentId || authenticatedStudentId };
       render();
     };
 
@@ -951,7 +1097,9 @@
       if (printableRecord) {
         root.innerHTML = renderPrintablePortfolioView();
       } else if (currentRole === "student") {
-        if (activeLessonId) {
+        if (!authenticatedStudentId) {
+          root.innerHTML = renderStudentLoginGate();
+        } else if (activeLessonId) {
           root.innerHTML = renderStudentLessonDetail(activeLessonId);
         } else if (activeAssignmentId) {
           root.innerHTML = renderStudentAssignmentDetail(activeAssignmentId);
@@ -959,8 +1107,8 @@
           root.innerHTML = renderStudentDashboard();
         }
       } else {
-        if (activeReviewSubmissionId) {
-          root.innerHTML = renderParentSubmissionGrader(activeReviewSubmissionId);
+        if (activeReviewKey) {
+          root.innerHTML = renderParentSubmissionGrader(activeReviewKey);
         } else {
           root.innerHTML = renderParentDashboard();
         }
@@ -970,20 +1118,73 @@
     }
 
     // -------------------------------------------------------------------------
-    // VIEW A: STUDENT DASHBOARD
+    // VIEW 0: PRIVATE STUDENT PIN LOGIN GATE
+    // -------------------------------------------------------------------------
+    function renderStudentLoginGate() {
+      const students = appState.settings.students;
+      if (!students.some(s => s.id === loginSelectedStudentId)) {
+        loginSelectedStudentId = students[0]?.id || "";
+      }
+      const chosen = getStudentById(loginSelectedStudentId);
+
+      return `
+        <div class="max-w-md mx-auto my-8 bg-white rounded-3xl p-8 border border-slate-200 shadow-sm text-center">
+          <div class="w-14 h-14 rounded-2xl bg-amberwarm-50 text-amberwarm-600 flex items-center justify-center mx-auto mb-4 text-2xl font-serif font-bold border border-amberwarm-100">
+            ☀
+          </div>
+          <h2 class="text-2xl font-bold text-slate-900 font-serif">Sunshine Homeschool</h2>
+          <p class="text-sm text-slate-500 mt-1 mb-6">Select your name and enter your private Student PIN to view your lessons and assignments.</p>
+
+          <!-- Student Selector Pills -->
+          <div class="flex flex-wrap justify-center gap-2 mb-6">
+            ${students.map(stu => `
+              <button type="button" onclick="selectStudentForLogin('${stu.id}')"
+                class="px-4 py-2.5 rounded-xl text-sm font-bold transition border ${
+                  stu.id === chosen?.id
+                    ? 'bg-sage-600 text-white border-sage-600 shadow-sm'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }">
+                ${stu.name} <span class="text-xs font-normal opacity-80">(${stu.gradeLevel})</span>
+              </button>
+            `).join("")}
+          </div>
+
+          <div class="bg-slate-50 rounded-2xl p-5 border border-slate-200 mb-4">
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+              ${chosen ? `${chosen.name}'s Student PIN` : 'Student PIN'}
+            </label>
+            <input type="password" id="student-login-pin-input" maxlength="8" placeholder="••••"
+              onkeydown="if(event.key==='Enter') verifyStudentLogin()"
+              class="w-full text-center text-2xl tracking-widest font-bold px-4 py-3 rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-sage-600 outline-none" />
+            ${loginErrorMsg ? `<p class="text-red-600 text-xs font-medium mt-2">${loginErrorMsg}</p>` : ''}
+          </div>
+
+          <button onclick="verifyStudentLogin()"
+            class="w-full py-3.5 rounded-xl bg-sage-600 hover:bg-sage-700 text-white font-bold text-sm shadow-sm transition">
+            Unlock My Dashboard →
+          </button>
+        </div>
+      `;
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW A: STUDENT DASHBOARD (AUTHENTICATED)
     // -------------------------------------------------------------------------
     function renderStudentDashboard() {
-      const todayStr = new Date().toISOString().slice(0, 10);
+      const student = getStudentById(authenticatedStudentId);
       const subjects = ["All", ...appState.settings.subjects];
 
-      const filteredLessons = appState.lessons.filter(l => selectedSubject === "All" || l.subject === selectedSubject);
-      const filteredAssignments = appState.assignments.filter(a => selectedSubject === "All" || a.subject === selectedSubject);
+      const myLessons = appState.lessons.filter(l => isLessonVisibleToStudent(l, student.id));
+      const myAssignments = appState.assignments.filter(a => isAssignmentVisibleToStudent(a, student.id));
+
+      const filteredLessons = myLessons.filter(l => selectedSubject === "All" || l.subject === selectedSubject);
+      const filteredAssignments = myAssignments.filter(a => selectedSubject === "All" || a.subject === selectedSubject);
 
       // Compute subject averages for Grades tab
       const subjectStats = {};
       appState.settings.subjects.forEach(s => subjectStats[s] = { earned: 0, total: 0, count: 0 });
-      appState.assignments.forEach(a => {
-        const sub = appState.submissions[a.id];
+      myAssignments.forEach(a => {
+        const sub = appState.submissions[getSubKey(student.id, a.id)];
         if (sub && (sub.status === "graded" || sub.status === "needs_review")) {
           if (!subjectStats[a.subject]) subjectStats[a.subject] = { earned: 0, total: 0, count: 0 };
           subjectStats[a.subject].earned += Number(sub.earnedPoints || 0);
@@ -993,22 +1194,27 @@
       });
 
       const todoAssignments = filteredAssignments.filter(a => {
-        const st = appState.submissions[a.id]?.status;
+        const st = appState.submissions[getSubKey(student.id, a.id)]?.status;
         return !st || st === "in_progress";
       });
 
       const completedAssignments = filteredAssignments.filter(a => {
-        const st = appState.submissions[a.id]?.status;
+        const st = appState.submissions[getSubKey(student.id, a.id)]?.status;
         return st === "graded" || st === "needs_review";
       });
 
-      const completedLessons = filteredLessons.filter(l => l.completedByStudent);
+      const completedLessons = filteredLessons.filter(l => isLessonCompletedBy(l, student.id));
 
       return `
         <div class="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
-            <p class="text-sm font-medium text-sage-600 mb-1">${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-            <h2 class="text-3xl font-bold text-slate-900 tracking-tight">Welcome back, ${appState.settings.studentName}</h2>
+            <div class="flex items-center gap-3 mb-1">
+              <p class="text-sm font-medium text-sage-600">${new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} • ${student.gradeLevel}</p>
+              <button onclick="lockStudentSession()" class="text-xs font-semibold text-slate-500 hover:text-slate-800 bg-white border border-slate-200 px-2.5 py-0.5 rounded-full">
+                🔒 Lock / Switch Student
+              </button>
+            </div>
+            <h2 class="text-3xl font-bold text-slate-900 tracking-tight">Welcome back, ${student.name}</h2>
           </div>
           <!-- Subject Filter Pills -->
           <div class="flex flex-wrap gap-1.5">
@@ -1028,7 +1234,7 @@
         <!-- Navigation Tabs -->
         <div class="flex gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
           ${[
-            { id: "today", label: "Today's Lessons", count: filteredLessons.filter(l => !l.completedByStudent).length },
+            { id: "today", label: "Today's Lessons", count: filteredLessons.filter(l => !isLessonCompletedBy(l, student.id)).length },
             { id: "todo", label: "To-Do", count: todoAssignments.length },
             { id: "completed", label: "Completed", count: completedLessons.length + completedAssignments.length },
             { id: "grades", label: "Grades", count: null }
@@ -1049,30 +1255,33 @@
         ${studentTab === "today" ? `
           <div class="grid md:grid-cols-2 gap-5">
             ${filteredLessons.length === 0 ? `<p class="text-slate-500 col-span-2 py-8 text-center">No lessons posted in this subject yet.</p>` : ''}
-            ${filteredLessons.map(les => `
-              <div class="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-sm hover:shadow-md transition flex flex-col justify-between">
-                <div>
-                  <div class="flex items-center justify-between gap-2 mb-3">
-                    <span class="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-md bg-sage-50 text-sage-700">${les.subject}</span>
-                    ${les.completedByStudent
-                      ? `<span class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">✓ Completed</span>`
-                      : `<span class="text-xs font-medium text-slate-400">${les.date || 'Today'}</span>`}
+            ${filteredLessons.map(les => {
+              const done = isLessonCompletedBy(les, student.id);
+              return `
+                <div class="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-sm hover:shadow-md transition flex flex-col justify-between">
+                  <div>
+                    <div class="flex items-center justify-between gap-2 mb-3">
+                      <span class="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-md bg-sage-50 text-sage-700">${les.subject}</span>
+                      ${done
+                        ? `<span class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">✓ Completed</span>`
+                        : `<span class="text-xs font-medium text-slate-400">${les.date || 'Today'}</span>`}
+                    </div>
+                    <h3 class="text-lg font-bold text-slate-900 mb-2">${les.title}</h3>
+                    <p class="text-sm text-slate-600 line-clamp-2 mb-4">${les.content.replace(/[#*$]/g, '').slice(0, 130)}...</p>
                   </div>
-                  <h3 class="text-lg font-bold text-slate-900 mb-2">${les.title}</h3>
-                  <p class="text-sm text-slate-600 line-clamp-2 mb-4">${les.content.replace(/[#*$]/g, '').slice(0, 130)}...</p>
-                </div>
-                <div class="pt-4 border-t border-slate-100 flex items-center justify-between">
-                  <div class="flex gap-2 text-xs text-slate-500">
-                    ${les.youtubeUrl ? `<span>▶ Video</span>` : ''}
-                    ${les.checkQuestion?.enabled ? `<span>• Quick Check</span>` : ''}
+                  <div class="pt-4 border-t border-slate-100 flex items-center justify-between">
+                    <div class="flex gap-2 text-xs text-slate-500">
+                      ${les.youtubeUrl ? `<span>▶ Video</span>` : ''}
+                      ${les.checkQuestion?.enabled ? `<span>• Quick Check</span>` : ''}
+                    </div>
+                    <button onclick="openLesson('${les.id}')"
+                      class="px-4 py-2 rounded-xl bg-sage-600 hover:bg-sage-700 text-white text-sm font-semibold transition">
+                      ${done ? 'Review Lesson' : 'Start Lesson →'}
+                    </button>
                   </div>
-                  <button onclick="openLesson('${les.id}')"
-                    class="px-4 py-2 rounded-xl bg-sage-600 hover:bg-sage-700 text-white text-sm font-semibold transition">
-                    ${les.completedByStudent ? 'Review Lesson' : 'Start Lesson →'}
-                  </button>
                 </div>
-              </div>
-            `).join("")}
+              `;
+            }).join("")}
           </div>
         ` : ''}
 
@@ -1086,9 +1295,9 @@
               </div>
             ` : ''}
             ${todoAssignments.map(asg => {
-              const linkedLesson = asg.linkedLessonId ? appState.lessons.find(l => l.id === asg.linkedLessonId) : null;
-              const isLockedByLesson = linkedLesson && !linkedLesson.completedByStudent;
-              const sub = appState.submissions[asg.id];
+              const linkedLesson = asg.linkedLessonId ? myLessons.find(l => l.id === asg.linkedLessonId) : null;
+              const isLockedByLesson = linkedLesson && !isLessonCompletedBy(linkedLesson, student.id);
+              const sub = appState.submissions[getSubKey(student.id, asg.id)];
               const totalPts = asg.questions.reduce((s, q) => s + Number(q.points || 0), 0);
 
               return `
@@ -1122,7 +1331,7 @@
         ${studentTab === "completed" ? `
           <div class="space-y-4">
             ${completedAssignments.map(asg => {
-              const sub = appState.submissions[asg.id];
+              const sub = appState.submissions[getSubKey(student.id, asg.id)];
               const pct = sub.totalPoints > 0 ? Math.round((sub.earnedPoints / sub.totalPoints) * 100) : 0;
               return `
                 <div class="bg-white rounded-2xl p-5 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1143,7 +1352,7 @@
                       <div class="text-xs font-semibold text-sage-600">${pct}%</div>
                     </div>
                     <button onclick="openAssignment('${asg.id}')" class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50">View</button>
-                    <button onclick="openPrintablePortfolio('submission', '${asg.id}')" class="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800">🖨 Print PDF</button>
+                    <button onclick="openPrintablePortfolio('submission', '${asg.id}', '${student.id}')" class="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800">🖨 Print PDF</button>
                   </div>
                 </div>
               `;
@@ -1157,7 +1366,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <button onclick="openLesson('${les.id}')" class="px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50">Review</button>
-                  <button onclick="openPrintablePortfolio('lesson', '${les.id}')" class="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800">🖨 Print PDF</button>
+                  <button onclick="openPrintablePortfolio('lesson', '${les.id}', '${student.id}')" class="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800">🖨 Print PDF</button>
                 </div>
               </div>
             `).join("")}
@@ -1196,7 +1405,9 @@
       const les = appState.lessons.find(l => l.id === lessonId);
       if (!les) return "";
       const embedUrl = extractYouTubeEmbedUrl(les.youtubeUrl);
-      const checkRequired = les.checkQuestion?.enabled && !les.checkPassed && !les.completedByStudent;
+      const done = isLessonCompletedBy(les, authenticatedStudentId);
+      const passedCheck = isCheckPassedBy(les, authenticatedStudentId);
+      const checkRequired = les.checkQuestion?.enabled && !passedCheck && !done;
 
       return `
         <div class="max-w-3xl mx-auto">
@@ -1204,7 +1415,7 @@
             <button onclick="activeLessonId=null; render();" class="text-sm font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1">
               ← Back to Dashboard
             </button>
-            <button onclick="openPrintablePortfolio('lesson', '${les.id}')" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50">
+            <button onclick="openPrintablePortfolio('lesson', '${les.id}', '${authenticatedStudentId}')" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50">
               🖨 Print / Save as PDF
             </button>
           </div>
@@ -1253,12 +1464,12 @@
                 <div class="space-y-2">
                   ${les.checkQuestion.options.map((opt, idx) => `
                     <label class="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-sage-600">
-                      <input type="radio" name="lesson-check-opt" value="${idx}" ${les.checkPassed && idx === les.checkQuestion.correctIndex ? 'checked disabled' : ''} />
+                      <input type="radio" name="lesson-check-opt" value="${idx}" ${(passedCheck || done) && idx === les.checkQuestion.correctIndex ? 'checked disabled' : ''} />
                       <span class="text-sm text-slate-800">${opt}</span>
                     </label>
                   `).join("")}
                 </div>
-                ${les.checkPassed || les.completedByStudent
+                ${passedCheck || done
                   ? `<p class="text-sm font-semibold text-emerald-700 mt-3">✓ Quick Check Passed!</p>`
                   : `<button onclick="submitLessonCheck('${les.id}')" class="mt-4 px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold">Verify Answer</button>
                      <p id="lesson-check-feedback"></p>`
@@ -1269,9 +1480,9 @@
             <!-- Mark Lesson Complete Footer -->
             <div class="mt-10 pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
               <p class="text-sm text-slate-500">
-                ${les.completedByStudent ? `Completed on ${new Date(les.completedAt).toLocaleDateString()}` : 'Finished reading and watching the material?'}
+                ${done ? `Completed on ${new Date(les.completedBy[authenticatedStudentId]).toLocaleDateString()}` : 'Finished reading and watching the material?'}
               </p>
-              ${les.completedByStudent
+              ${done
                 ? `<span class="px-5 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-sm">✓ Lesson Completed</span>`
                 : `<button onclick="markLessonComplete('${les.id}')" ${checkRequired ? 'disabled' : ''}
                     class="px-6 py-3 rounded-xl font-semibold text-sm transition ${
@@ -1294,7 +1505,7 @@
     function renderStudentAssignmentDetail(assignmentId) {
       const asg = appState.assignments.find(a => a.id === assignmentId);
       if (!asg) return "";
-      const sub = appState.submissions[assignmentId];
+      const sub = appState.submissions[getSubKey(authenticatedStudentId, assignmentId)];
       const isSubmitted = sub && (sub.status === "graded" || sub.status === "needs_review");
 
       // Strict Mode Pre-Flight Full-Screen Gate
@@ -1333,7 +1544,7 @@
             ` : `<span class="text-xs font-bold uppercase tracking-wider text-red-600 bg-red-50 px-3 py-1.5 rounded-full">🔒 Focus Monitoring Active</span>`}
 
             ${isSubmitted ? `
-              <button onclick="openPrintablePortfolio('submission', '${asg.id}')" class="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold">
+              <button onclick="openPrintablePortfolio('submission', '${asg.id}', '${authenticatedStudentId}')" class="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold">
                 🖨 Print Graded Record
               </button>
             ` : ''}
@@ -1457,13 +1668,14 @@
     // VIEW D: PARENT DASHBOARD & CONTENT BUILDERS
     // -------------------------------------------------------------------------
     function renderParentDashboard() {
-      const pendingReviews = appState.assignments.filter(a => appState.submissions[a.id]?.status === "needs_review");
+      const pendingSubKeys = Object.keys(appState.submissions).filter(k => appState.submissions[k]?.status === "needs_review");
+      const students = appState.settings.students;
 
       return `
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
-            <h2 class="text-2xl font-bold text-slate-900">Parent &amp; Teacher Workspace</h2>
-            <p class="text-sm text-slate-500">Manage ${appState.settings.studentName}'s curriculum, review written responses, and export portfolio records.</p>
+            <h2 class="text-2xl font-bold text-slate-900">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
+            <p class="text-sm text-slate-500">Manage student PINs, assign lessons &amp; quizzes, review work, and export portfolio records.</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <button onclick="exportGradesCSV()" class="px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50">
@@ -1481,8 +1693,8 @@
             { id: "overview", label: "Curriculum & Submissions" },
             { id: "create-lesson", label: "+ New Lesson" },
             { id: "create-assignment", label: "+ New Homework / Quiz" },
-            { id: "gradebook", label: "Gradebook & Portfolio", badge: pendingReviews.length },
-            { id: "settings", label: "Settings & PIN" }
+            { id: "gradebook", label: "Gradebook & Portfolio", badge: pendingSubKeys.length },
+            { id: "students", label: "Students & PINs" }
           ].map(t => `
             <button onclick="setParentTab('${t.id}')"
               class="pb-3 px-4 text-sm font-semibold border-b-2 whitespace-nowrap transition flex items-center gap-2 ${
@@ -1496,22 +1708,28 @@
 
         <!-- PARENT TAB 1: OVERVIEW -->
         ${parentTab === "overview" ? `
-          ${pendingReviews.length > 0 ? `
+          ${pendingSubKeys.length > 0 ? `
             <div class="mb-8 p-5 rounded-2xl bg-amberwarm-50 border border-amberwarm-100">
               <h3 class="font-bold text-amberwarm-600 text-sm uppercase tracking-wider mb-3">Action Needed: Written Work Awaiting Grading</h3>
               <div class="space-y-2">
-                ${pendingReviews.map(a => `
-                  <div class="bg-white p-4 rounded-xl border border-amberwarm-100 flex items-center justify-between">
-                    <div>
-                      <span class="text-xs font-bold text-slate-500">${a.subject}</span>
-                      <p class="font-bold text-slate-900">${a.title}</p>
+                ${pendingSubKeys.map(subKey => {
+                  const sub = appState.submissions[subKey];
+                  const asg = appState.assignments.find(a => a.id === sub.assignmentId);
+                  const stu = getStudentById(sub.studentId);
+                  if (!asg) return "";
+                  return `
+                    <div class="bg-white p-4 rounded-xl border border-amberwarm-100 flex items-center justify-between">
+                      <div>
+                        <span class="text-xs font-bold text-sage-700">${stu?.name || 'Student'} • ${asg.subject}</span>
+                        <p class="font-bold text-slate-900">${asg.title}</p>
+                      </div>
+                      <button onclick="activeReviewKey='${subKey}'; render();"
+                        class="px-4 py-2 rounded-lg bg-amberwarm-600 text-white text-xs font-bold hover:opacity-90">
+                        Review &amp; Grade →
+                      </button>
                     </div>
-                    <button onclick="activeReviewSubmissionId='${a.id}'; render();"
-                      class="px-4 py-2 rounded-lg bg-amberwarm-600 text-white text-xs font-bold hover:opacity-90">
-                      Review &amp; Grade →
-                    </button>
-                  </div>
-                `).join("")}
+                  `;
+                }).join("")}
               </div>
             </div>
           ` : ''}
@@ -1524,19 +1742,24 @@
                 <button onclick="setParentTab('create-lesson')" class="text-xs font-bold text-sage-600 hover:underline">+ Add Lesson</button>
               </div>
               <div class="space-y-3">
-                ${appState.lessons.map(l => `
-                  <div class="p-3.5 rounded-xl border border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
-                    <div>
-                      <span class="text-xs font-bold text-sage-700">${l.subject}</span>
-                      <p class="font-semibold text-sm text-slate-900">${l.title}</p>
-                      <span class="text-xs text-slate-500">${l.completedByStudent ? '✓ Completed by student' : 'Pending'}</span>
+                ${appState.lessons.map(l => {
+                  const targetStu = l.studentId === "ALL" ? "All Students" : (getStudentById(l.studentId)?.name || "Student");
+                  return `
+                    <div class="p-3.5 rounded-xl border border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
+                      <div>
+                        <div class="flex items-center gap-1.5">
+                          <span class="text-xs font-bold text-sage-700">${l.subject}</span>
+                          <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">${targetStu}</span>
+                        </div>
+                        <p class="font-semibold text-sm text-slate-900 mt-0.5">${l.title}</p>
+                      </div>
+                      <div class="flex items-center gap-1.5">
+                        <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${l.studentId === 'ALL' ? students[0]?.id : l.studentId}')" title="Print Portfolio Record" class="p-2 text-slate-500 hover:text-slate-900 text-xs">🖨</button>
+                        <button onclick="deleteItem('lesson', '${l.id}')" title="Delete" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
+                      </div>
                     </div>
-                    <div class="flex items-center gap-1.5">
-                      <button onclick="openPrintablePortfolio('lesson', '${l.id}')" title="Print Portfolio Record" class="p-2 text-slate-500 hover:text-slate-900 text-xs">🖨</button>
-                      <button onclick="deleteItem('lesson', '${l.id}')" title="Delete" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
-                    </div>
-                  </div>
-                `).join("")}
+                  `;
+                }).join("")}
               </div>
             </div>
 
@@ -1548,25 +1771,19 @@
               </div>
               <div class="space-y-3">
                 ${appState.assignments.map(a => {
-                  const sub = appState.submissions[a.id];
+                  const targetStu = a.studentId === "ALL" ? "All Students" : (getStudentById(a.studentId)?.name || "Student");
                   return `
                     <div class="p-3.5 rounded-xl border border-slate-100 bg-slate-50/60 flex items-center justify-between gap-2">
                       <div>
                         <div class="flex items-center gap-1.5">
                           <span class="text-xs font-bold text-slate-600">${a.subject}</span>
+                          <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">${targetStu}</span>
                           ${a.strictMode ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">STRICT</span>` : ''}
                         </div>
-                        <p class="font-semibold text-sm text-slate-900">${a.title}</p>
-                        <span class="text-xs text-slate-500">
-                          ${sub ? `Status: ${sub.status.replace('_', ' ')} (${sub.earnedPoints ?? 0}/${sub.totalPoints ?? '-'} pts)` : `Due ${a.dueDate || 'N/A'}`}
-                        </span>
+                        <p class="font-semibold text-sm text-slate-900 mt-0.5">${a.title}</p>
+                        <span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span>
                       </div>
-                      <div class="flex items-center gap-1.5">
-                        ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
-                          <button onclick="activeReviewSubmissionId='${a.id}'; render();" class="px-2.5 py-1 rounded bg-white border border-slate-200 text-xs font-semibold text-slate-700">Grade</button>
-                        ` : ''}
-                        <button onclick="deleteItem('assignment', '${a.id}')" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
-                      </div>
+                      <button onclick="deleteItem('assignment', '${a.id}')" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
                     </div>
                   `;
                 }).join("")}
@@ -1581,22 +1798,29 @@
             <h3 class="text-xl font-bold text-slate-900">Create Class Lesson</h3>
             <div class="grid sm:grid-cols-3 gap-4">
               <div>
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To Student</label>
+                <select id="les_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
+                  ${students.map(s => `<option value="${s.id}">${s.name} (${s.gradeLevel})</option>`).join("")}
+                  <option value="ALL">All Students</option>
+                </select>
+              </div>
+              <div>
                 <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
                 <select id="les_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
                   ${appState.settings.subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
                 </select>
               </div>
-              <div class="sm:col-span-2">
-                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Title</label>
-                <input type="text" id="les_title" required placeholder="e.g., Pythagorean Theorem Applications"
-                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+              <div>
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Date</label>
+                <input type="date" id="les_date" value="${new Date().toISOString().slice(0,10)}"
+                  class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm" />
               </div>
             </div>
 
             <div>
-              <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Date</label>
-              <input type="date" id="les_date" value="${new Date().toISOString().slice(0,10)}"
-                class="px-3.5 py-2 rounded-xl border border-slate-300 text-sm" />
+              <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Title</label>
+              <input type="text" id="les_title" required placeholder="e.g., Pythagorean Theorem Applications"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
             </div>
 
             <div>
@@ -1660,7 +1884,14 @@
           <form onsubmit="publishNewAssignment(event)" class="max-w-3xl bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 space-y-6">
             <h3 class="text-xl font-bold text-slate-900">Build Homework or Assessment</h3>
 
-            <div class="grid sm:grid-cols-3 gap-4">
+            <div class="grid sm:grid-cols-4 gap-4">
+              <div>
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To</label>
+                <select id="asg_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
+                  ${students.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}
+                  <option value="ALL">All Students</option>
+                </select>
+              </div>
               <div>
                 <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
                 <select id="asg_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
@@ -1705,7 +1936,7 @@
                   🔒 Enable Strict Test Mode (Anti-AI Focus Lock)
                 </label>
                 <p class="text-xs text-red-700 mt-0.5">
-                  Requires Full-Screen Mode, blocks copy/paste/right-click, and pauses the test requiring your Parent PIN if she switches tabs or exits full-screen.
+                  Requires Full-Screen Mode, blocks copy/paste/right-click, and pauses the test requiring your Parent PIN if the student switches tabs or exits full-screen.
                 </p>
               </div>
             </div>
@@ -1783,11 +2014,27 @@
 
         <!-- PARENT TAB 4: GRADEBOOK & PORTFOLIO -->
         ${parentTab === "gradebook" ? `
+          <div class="mb-4 flex items-center gap-2">
+            <span class="text-xs font-bold uppercase text-slate-500">Filter by Student:</span>
+            ${["All", ...students.map(s => s.id)].map(id => {
+              const label = id === "All" ? "All Students" : getStudentById(id)?.name;
+              return `
+                <button onclick="parentStudentFilter='${id}'; render();"
+                  class="px-3 py-1 rounded-full text-xs font-semibold ${
+                    parentStudentFilter === id ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600'
+                  }">
+                  ${label}
+                </button>
+              `;
+            }).join("")}
+          </div>
+
           <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
             <div class="overflow-x-auto">
               <table class="w-full text-left border-collapse text-sm">
                 <thead>
                   <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                    <th class="py-3.5 px-4">Student</th>
                     <th class="py-3.5 px-4">Subject</th>
                     <th class="py-3.5 px-4">Assessment / Assignment</th>
                     <th class="py-3.5 px-4">Status</th>
@@ -1797,72 +2044,129 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                  ${appState.assignments.map(a => {
-                    const sub = appState.submissions[a.id];
-                    const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
-                    const pct = sub && sub.earnedPoints !== undefined && totalPts > 0
-                      ? Math.round((sub.earnedPoints / totalPts) * 100) + "%"
-                      : "—";
-                    const violCount = sub?.violations?.length || 0;
+                  ${students
+                    .filter(stu => parentStudentFilter === "All" || stu.id === parentStudentFilter)
+                    .flatMap(stu => appState.assignments
+                      .filter(a => isAssignmentVisibleToStudent(a, stu.id))
+                      .map(a => {
+                        const subKey = getSubKey(stu.id, a.id);
+                        const sub = appState.submissions[subKey];
+                        const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+                        const pct = sub && sub.earnedPoints !== undefined && totalPts > 0
+                          ? Math.round((sub.earnedPoints / totalPts) * 100) + "%"
+                          : "—";
+                        const violCount = sub?.violations?.length || 0;
 
-                    return `
-                      <tr>
-                        <td class="py-3.5 px-4 font-semibold text-slate-700">${a.subject}</td>
-                        <td class="py-3.5 px-4 font-medium text-slate-900">${a.title}</td>
-                        <td class="py-3.5 px-4">
-                          <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${
-                            !sub ? 'bg-slate-100 text-slate-500' :
-                            sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' :
-                            sub.status === 'needs_review' ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-blue-50 text-blue-700'
-                          }">
-                            ${!sub ? 'Not Started' : sub.status.replace('_', ' ')}
-                          </span>
-                        </td>
-                        <td class="py-3.5 px-4 font-bold text-slate-900">
-                          ${sub && sub.earnedPoints !== undefined ? `${sub.earnedPoints}/${totalPts} (${pct})` : '—'}
-                        </td>
-                        <td class="py-3.5 px-4 text-xs">
-                          ${a.strictMode
-                            ? (violCount > 0 ? `<span class="text-red-600 font-bold">⚠ ${violCount} alert(s)</span>` : `<span class="text-emerald-600">Clean</span>`)
-                            : `<span class="text-slate-400">Standard</span>`}
-                        </td>
-                        <td class="py-3.5 px-4 text-right space-x-2">
-                          ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
-                            <button onclick="activeReviewSubmissionId='${a.id}'; render();" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold hover:bg-slate-50">Review</button>
-                            <button onclick="openPrintablePortfolio('submission', '${a.id}')" class="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold">🖨 PDF</button>
-                          ` : ''}
-                        </td>
-                      </tr>
-                    `;
-                  }).join("")}
+                        return `
+                          <tr>
+                            <td class="py-3.5 px-4 font-bold text-slate-900">${stu.name}</td>
+                            <td class="py-3.5 px-4 font-semibold text-slate-700">${a.subject}</td>
+                            <td class="py-3.5 px-4 font-medium text-slate-900">${a.title}</td>
+                            <td class="py-3.5 px-4">
+                              <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                !sub ? 'bg-slate-100 text-slate-500' :
+                                sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' :
+                                sub.status === 'needs_review' ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-blue-50 text-blue-700'
+                              }">
+                                ${!sub ? 'Not Started' : sub.status.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td class="py-3.5 px-4 font-bold text-slate-900">
+                              ${sub && sub.earnedPoints !== undefined ? `${sub.earnedPoints}/${totalPts} (${pct})` : '—'}
+                            </td>
+                            <td class="py-3.5 px-4 text-xs">
+                              ${a.strictMode
+                                ? (violCount > 0 ? `<span class="text-red-600 font-bold">⚠ ${violCount} alert(s)</span>` : `<span class="text-emerald-600">Clean</span>`)
+                                : `<span class="text-slate-400">Standard</span>`}
+                            </td>
+                            <td class="py-3.5 px-4 text-right space-x-2">
+                              ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
+                                <button onclick="activeReviewKey='${subKey}'; render();" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold hover:bg-slate-50">Review</button>
+                                <button onclick="openPrintablePortfolio('submission', '${a.id}', '${stu.id}')" class="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold">🖨 PDF</button>
+                              ` : ''}
+                            </td>
+                          </tr>
+                        `;
+                      })
+                    ).join("")}
                 </tbody>
               </table>
             </div>
           </div>
         ` : ''}
 
-        <!-- PARENT TAB 5: SETTINGS -->
-        ${parentTab === "settings" ? `
-          <form onsubmit="saveSettings(event)" class="max-w-xl bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 space-y-4">
-            <h3 class="text-xl font-bold text-slate-900">Homeschool Settings</h3>
-            <div>
-              <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Student First Name</label>
-              <input type="text" id="set_student_name" value="${appState.settings.studentName}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+        <!-- PARENT TAB 5: STUDENTS & PINS -->
+        ${parentTab === "students" ? `
+          <div class="grid md:grid-cols-2 gap-6">
+            <!-- Manage Individual Student PINs -->
+            <div class="space-y-4">
+              <div class="bg-white rounded-2xl p-6 border border-slate-200 space-y-4">
+                <h3 class="text-lg font-bold text-slate-900">Student Profiles &amp; Private PINs</h3>
+                <p class="text-xs text-slate-500">Each student must enter their assigned PIN to view their dashboard, lessons, and grades.</p>
+
+                <div class="space-y-3">
+                  ${students.map(stu => `
+                    <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                      <div class="grid grid-cols-3 gap-2">
+                        <div>
+                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Name</label>
+                          <input type="text" id="edit_stu_name_${stu.id}" value="${stu.name}" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white font-semibold" />
+                        </div>
+                        <div>
+                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Grade</label>
+                          <input type="text" id="edit_stu_grade_${stu.id}" value="${stu.gradeLevel}" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+                        </div>
+                        <div>
+                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Student PIN</label>
+                          <input type="text" id="edit_stu_pin_${stu.id}" value="${stu.pin}" maxlength="8" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white font-mono font-bold" />
+                        </div>
+                      </div>
+                      <div class="flex justify-between items-center pt-1">
+                        ${students.length > 1
+                          ? `<button type="button" onclick="removeStudent('${stu.id}')" class="text-xs text-red-500 hover:underline">Remove</button>`
+                          : `<span></span>`}
+                        <button type="button" onclick="updateStudentPinAndInfo('${stu.id}')"
+                          class="px-3.5 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800">
+                          Save Student &amp; PIN
+                        </button>
+                      </div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+
+              <!-- Add Another Student -->
+              <form onsubmit="addNewStudent(event)" class="bg-white rounded-2xl p-6 border border-slate-200 space-y-3">
+                <h4 class="font-bold text-slate-900 text-sm">+ Add Another Student</h4>
+                <div class="grid grid-cols-3 gap-2">
+                  <input type="text" id="new_stu_name" required placeholder="First Name" class="px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+                  <input type="text" id="new_stu_grade" placeholder="Grade (e.g. 6th Grade)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+                  <input type="text" id="new_stu_pin" required maxlength="8" placeholder="PIN (4-8 digits)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs font-mono" />
+                </div>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-sage-600 text-white text-xs font-bold hover:bg-sage-700">
+                  Create Student Login
+                </button>
+              </form>
             </div>
-            <div>
-              <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Academic Year (Appears on Portfolio PDFs)</label>
-              <input type="text" id="set_school_year" value="${appState.settings.schoolYear}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent PIN (4–8 digits)</label>
-              <input type="text" id="set_parent_pin" value="${appState.settings.parentPin}" maxlength="8" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono" />
-            </div>
-            <div>
-              <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subjects (Comma-Separated)</label>
-              <input type="text" id="set_subjects" value="${appState.settings.subjects.join(', ')}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-            </div>
-            <button type="submit" class="px-6 py-2.5 rounded-xl bg-sage-600 text-white font-bold text-sm">Save Settings</button>
-          </form>
+
+            <!-- Parent PIN & School Settings -->
+            <form onsubmit="saveGeneralSettings(event)" class="bg-white rounded-2xl p-6 border border-slate-200 space-y-4 h-fit">
+              <h3 class="text-lg font-bold text-slate-900">Parent PIN &amp; School Settings</h3>
+              <div>
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent / Teacher Master PIN (4–8 digits)</label>
+                <input type="text" id="set_parent_pin" value="${appState.settings.parentPin}" maxlength="8" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Academic Year (Appears on Portfolio PDFs)</label>
+                <input type="text" id="set_school_year" value="${appState.settings.schoolYear}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subjects (Comma-Separated)</label>
+                <input type="text" id="set_subjects" value="${appState.settings.subjects.join(', ')}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
+              </div>
+              <button type="submit" class="px-6 py-2.5 rounded-xl bg-sage-600 text-white font-bold text-sm">Save Settings</button>
+            </form>
+          </div>
         ` : ''}
       `;
     }
@@ -1870,19 +2174,21 @@
     // -------------------------------------------------------------------------
     // VIEW E: PARENT SUBMISSION GRADER & FEEDBACK
     // -------------------------------------------------------------------------
-    function renderParentSubmissionGrader(assignmentId) {
-      const asg = appState.assignments.find(a => a.id === assignmentId);
-      const sub = appState.submissions[assignmentId];
-      if (!asg || !sub) return "";
+    function renderParentSubmissionGrader(subKey) {
+      const sub = appState.submissions[subKey];
+      if (!sub) return "";
+      const asg = appState.assignments.find(a => a.id === sub.assignmentId);
+      const stu = getStudentById(sub.studentId);
+      if (!asg) return "";
 
       return `
         <div class="max-w-3xl mx-auto">
-          <button onclick="activeReviewSubmissionId=null; render();" class="text-sm font-semibold text-slate-600 hover:text-slate-900 mb-4">
-            ← Back to Parent Workspace
+          <button onclick="activeReviewKey=null; render();" class="text-sm font-semibold text-slate-600 hover:text-slate-900 mb-4">
+            ← Back to Parent Hub
           </button>
 
           <div class="bg-white rounded-2xl p-6 border border-slate-200 mb-6">
-            <span class="text-xs font-bold uppercase text-sage-700">${asg.subject} • ${asg.type}</span>
+            <span class="text-xs font-bold uppercase text-sage-700">${stu?.name || 'Student'} • ${asg.subject} • ${asg.type}</span>
             <h2 class="text-2xl font-bold text-slate-900 mt-1">${asg.title}</h2>
             <p class="text-xs text-slate-500 mt-1">Submitted: ${new Date(sub.submittedAt).toLocaleString()}</p>
 
@@ -1917,7 +2223,7 @@
                   </div>
 
                   <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-800">
-                    <span class="block text-[11px] font-bold uppercase text-slate-400 mb-1">${appState.settings.studentName}'s Answer:</span>
+                    <span class="block text-[11px] font-bold uppercase text-slate-400 mb-1">${stu?.name || 'Student'}'s Answer:</span>
                     ${displayAns || '<em class="text-slate-400">No answer provided</em>'}
                   </div>
 
@@ -1935,7 +2241,7 @@
             <label class="block text-xs font-bold uppercase text-slate-500">Encouraging Feedback &amp; Notes for Portfolio</label>
             <textarea id="grade_parent_feedback" rows="3" placeholder="Great work showing your steps on the equations!"
               class="w-full px-4 py-3 rounded-xl border border-slate-300 text-sm">${sub.parentFeedback || ''}</textarea>
-            <button onclick="saveParentGradeReview('${asg.id}')"
+            <button onclick="saveParentGradeReview('${subKey}')"
               class="px-6 py-3 rounded-xl bg-sage-600 hover:bg-sage-700 text-white font-bold text-sm shadow-sm">
               Finalize Grade &amp; Save Feedback
             </button>
@@ -1948,12 +2254,13 @@
     // VIEW F: PRINTABLE PORTFOLIO RECORD (CLEAN PDF EXPORT LAYOUT)
     // -------------------------------------------------------------------------
     function renderPrintablePortfolioView() {
-      const { kind, id } = printableRecord;
+      const { kind, id, studentId } = printableRecord;
+      const stu = getStudentById(studentId);
       const isLesson = kind === "lesson";
       const item = isLesson
         ? appState.lessons.find(l => l.id === id)
         : appState.assignments.find(a => a.id === id);
-      const sub = !isLesson ? appState.submissions[id] : null;
+      const sub = !isLesson ? appState.submissions[getSubKey(stu.id, id)] : null;
       if (!item) return "";
 
       const pct = sub && sub.totalPoints > 0 ? Math.round((sub.earnedPoints / sub.totalPoints) * 100) : 0;
@@ -1970,14 +2277,14 @@
           </div>
 
           <div class="bg-white rounded-2xl p-8 sm:p-12 border border-slate-200 shadow-sm print-container">
-            <!-- Official Homeschool Portfolio Header -->
+            <!-- Official Sunshine Homeschool Portfolio Header -->
             <div class="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-end">
               <div>
-                <p class="text-xs font-bold uppercase tracking-widest text-slate-500">Homeschool Academic Portfolio Record</p>
+                <p class="text-xs font-bold uppercase tracking-widest text-amberwarm-600">Sunshine Homeschool • Academic Portfolio Record</p>
                 <h1 class="text-2xl font-bold text-slate-900 mt-1">${item.title}</h1>
               </div>
               <div class="text-right text-xs text-slate-600 space-y-0.5">
-                <p><strong>Student:</strong> ${appState.settings.studentName} (${appState.settings.gradeLevel})</p>
+                <p><strong>Student:</strong> ${stu.name} (${stu.gradeLevel})</p>
                 <p><strong>Academic Year:</strong> ${appState.settings.schoolYear}</p>
                 <p><strong>Subject:</strong> ${item.subject}</p>
               </div>
@@ -1986,7 +2293,7 @@
             ${isLesson ? `
               <div class="mb-6 text-xs text-slate-600 flex gap-6">
                 <span><strong>Record Type:</strong> Completed Class Lesson</span>
-                <span><strong>Date Completed:</strong> ${item.completedAt ? new Date(item.completedAt).toLocaleDateString() : item.date}</span>
+                <span><strong>Date Completed:</strong> ${item.completedBy?.[stu.id] ? new Date(item.completedBy[stu.id]).toLocaleDateString() : item.date}</span>
               </div>
               <div class="text-sm text-slate-800 leading-relaxed space-y-3">
                 ${formatRichText(item.content)}
@@ -2026,7 +2333,7 @@
             `}
 
             <div class="mt-12 pt-6 border-t border-slate-300 flex justify-between text-xs text-slate-500">
-              <span>Verified by Homeschool Educator</span>
+              <span>Sunshine Homeschool — Verified Educator Record</span>
               <span>Date Printed: ${new Date().toLocaleDateString()}</span>
             </div>
           </div>
