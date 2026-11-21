@@ -225,7 +225,7 @@
     // =========================================================================
     // 1. FIREBASE CONFIGURATION (PASTE YOUR FREE FIREBASE KEYS HERE)
     // =========================================================================
-     const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyDscZ7MgKhibd8NTCCm4syElUaTj9o3KTk",
     authDomain: "sunshine-homeschool.firebaseapp.com",
     databaseURL: "https://sunshine-homeschool-default-rtdb.firebaseio.com",
@@ -268,36 +268,28 @@
         announcements: [
           {
             id: "ann_1",
-            date: "2026-11-20",
+            date: "2026-11-30",
             title: "Welcome to Sunshine Homeschool!",
-            body: "Your lessons, assignments, and Google Calendar schedule are synced to your Google account."
+            body: "Check your daily spiral warm-ups and lessons each morning."
           }
         ],
-        subjects: ["Pre-Algebra", "Physical Science", "English & Literature", "U.S. History", "Spanish I", "Electives & JROTC"],
+        subjects: ["Pre-Algebra", "Language Arts 3 Advanced", "Comprehensive Science 3", "World History"],
         subjectDetails: {
           "Pre-Algebra": {
-            syllabus: "Semester 1 covers linear equations, inequalities, slope-intercept form ($y = mx + b$), systems of equations, and functions.",
-            currentUnit: "Unit 3: Linear Functions & Graphing Slope"
+            syllabus: "Quarter 2 covers integer exponents, multi-step linear equations, and Module 5 Relations & Functions (linear vs. nonlinear functions and qualitative graphs).",
+            currentUnit: "Module 5: Relations & Functions"
           },
-          "Physical Science": {
-            syllabus: "Introduction to mechanics, Newton's laws of motion, energy transformations, waves, and introductory chemistry.",
-            currentUnit: "Unit 2: Forces, Mass & Acceleration"
+          "Language Arts 3 Advanced": {
+            syllabus: "Quarter 2 focuses on dramatic literature (The Diary of Anne Frank, Acts I–II), dramatic irony, denotation/connotation, and MLA-cited argumentative writing.",
+            currentUnit: "Unit 2: The Diary of Anne Frank (Act II)"
           },
-          "English & Literature": {
-            syllabus: "Novel studies, persuasive essay composition, grammar mechanics, and vocabulary building.",
-            currentUnit: "Unit 2: Analytical Essay Writing & Rhetoric"
+          "Comprehensive Science 3": {
+            syllabus: "Quarter 2 covers properties of matter, density, atoms, Law of Conservation of Mass, pure substances vs. mixtures, and acids, bases & pH.",
+            currentUnit: "Chemistry: Conservation of Mass, Mixtures & pH"
           },
-          "U.S. History": {
-            syllabus: "Exploration through Reconstruction, constitutional foundations, and civic analysis.",
-            currentUnit: "Unit 3: The U.S. Constitution & Bill of Rights"
-          },
-          "Spanish I": {
-            syllabus: "Foundational conversational Spanish, present-tense verb conjugations, vocabulary, and cultural studies.",
-            currentUnit: "Unit 3: Daily Routines & Reflexive Verbs"
-          },
-          "Electives & JROTC": {
-            syllabus: "Leadership development, physical fitness, digital design, and creative arts.",
-            currentUnit: "Semester Project & Community Service"
+          "World History": {
+            syllabus: "Quarter 2 examines Classical Greece (Athens, Sparta, direct democracy), Hellenistic culture, the Roman Republic, and the Roman Empire.",
+            currentUnit: "Unit 3–4: Classical Greece & Rome"
           }
         },
         students: [
@@ -309,16 +301,7 @@
           }
         ]
       },
-      schedule: [
-        { id: "sch_1", day: "Monday", startTime: "09:00", endTime: "10:00", title: "Pre-Algebra Independent Study", category: "Independent Study", subject: "Pre-Algebra" },
-        { id: "sch_2", day: "Monday", startTime: "10:15", endTime: "11:15", title: "Physical Science Lab & Notes", category: "Independent Study", subject: "Physical Science" },
-        { id: "sch_3", day: "Monday", startTime: "13:00", endTime: "14:00", title: "FLVS Spanish I Live Session", category: "Live Virtual Class", subject: "Spanish I" },
-        { id: "sch_4", day: "Tuesday", startTime: "09:00", endTime: "10:30", title: "English & Literature Reading/Writing", category: "Independent Study", subject: "English & Literature" },
-        { id: "sch_5", day: "Tuesday", startTime: "14:30", endTime: "16:00", title: "JROTC Drill & Leadership Practice", category: "Extracurricular", subject: "Electives & JROTC" },
-        { id: "sch_6", day: "Wednesday", startTime: "09:30", endTime: "10:30", title: "Math Review & Khan Academy Practice", category: "Independent Study", subject: "Pre-Algebra" },
-        { id: "sch_7", day: "Thursday", startTime: "10:00", endTime: "11:00", title: "U.S. History Virtual Discussion", category: "Live Virtual Class", subject: "U.S. History" },
-        { id: "sch_8", day: "Friday", startTime: "09:00", endTime: "11:30", title: "Weekly Checkpoint Quizzes & Reading Log", category: "Independent Study", subject: "All Subjects" }
-      ],
+      schedule: [],
       resources: [
         { id: "res_1", title: "Khan Academy — 8th Grade Math", category: "Math & Science", url: "https://www.khanacademy.org/math/cc-eighth-grade-math", notes: "Sign in with your Gmail account for mastery points." },
         { id: "res_2", title: "FLVS Student Portal (VSA)", category: "Virtual Courses", url: "https://login.flvs.net/", notes: "Check course announcements and DBA schedules." },
@@ -326,161 +309,12 @@
         { id: "res_4", title: "Google Docs — Essay & Notes", category: "Google Workspace", url: "https://docs.google.com/", notes: "Create and share written reports." },
         { id: "res_5", title: "Desmos Graphing Calculator", category: "Study Tools", url: "https://www.desmos.com/calculator", notes: "Use for graphing linear equations during homework (not permitted during Strict Tests)." }
       ],
-      lessons: [
-        {
-          id: "les_101",
-          studentId: "stu_1",
-          subject: "Pre-Algebra",
-          title: "Solving Multi-Step Linear Equations & Slope",
-          date: "2026-11-20",
-          content: `Welcome to today's Pre-Algebra lesson! Today we are reviewing how to isolate a variable when it appears on both sides of an equation, and how to connect linear equations to slope-intercept form.\n\n### 1. Balancing Both Sides\nConsider the equation:\n$$3x + 7 = 2x - 5$$\nTo solve for $x$, move all variable terms to one side by subtracting $2x$ from both sides:\n$$x + 7 = -5$$\nNext, subtract $7$ from both sides:\n$$x = -12$$\n\n### 2. Slope-Intercept Form\nEvery non-vertical straight line can be written as:\n$$y = mx + b$$\nWhere $m$ is the **slope** ($m = \\frac{y_2 - y_1}{x_2 - x_1}$) and $b$ is the **y-intercept** (where the line crosses the vertical $y$-axis).`,
-          youtubeUrl: "https://www.youtube.com/watch?v=9IUEk9fn2Vs",
-          resourceLink: "https://www.khanacademy.org/math/algebra/x2f8bb11595b61c86:solve-equations-inequalities",
-          imageUrl: "",
-          checkQuestion: {
-            enabled: true,
-            prompt: "Quick Check: In the equation $y = -4x + 9$, what is the slope ($m$)?",
-            options: ["9", "-4", "4", "-9"],
-            correctIndex: 1
-          },
-          completedBy: {}
-        },
-        {
-          id: "les_102",
-          studentId: "stu_1",
-          subject: "Physical Science",
-          title: "Newton's Second Law: Force, Mass & Acceleration",
-          date: "2026-11-20",
-          content: `Sir Isaac Newton's Second Law of Motion explains how the velocity of an object changes when it is subjected to an external force.\n\n### The Core Formula\n$$F = m \\cdot a$$\n* **$F$** = Net Force measured in Newtons ($\\text{N}$, or $\\text{kg}\\cdot\\text{m/s}^2$)\n* **$m$** = Mass measured in kilograms ($\\text{kg}$)\n* **$a$** = Acceleration measured in meters per second squared ($\\text{m/s}^2$)\n\n### Example Problem\nIf you push a $15\\text{ kg}$ cart with an acceleration of $2\\text{ m/s}^2$, the net force is:\n$$F = 15\\text{ kg} \\times 2\\text{ m/s}^2 = 30\\text{ N}$$`,
-          youtubeUrl: "",
-          resourceLink: "https://phet.colorado.edu/en/simulations/forces-and-motion-basics",
-          imageUrl: "",
-          checkQuestion: {
-            enabled: true,
-            prompt: "Quick Check: If mass stays constant and you double the net force, what happens to acceleration?",
-            options: ["It stays the same", "It is cut in half", "It doubles", "It drops to zero"],
-            correctIndex: 2
-          },
-          completedBy: {
-            stu_1: "2026-11-19T14:20:00.000Z"
-          }
-        }
-      ],
-      assignments: [
-        {
-          id: "asg_201",
-          studentId: "stu_1",
-          subject: "Pre-Algebra",
-          title: "Linear Equations & Slope Practice Set",
-          type: "Homework",
-          dueDate: "2026-11-22",
-          linkedLessonId: "les_101",
-          strictMode: false,
-          allowProjectLink: true,
-          questions: [
-            {
-              id: "q1",
-              type: "mcq",
-              prompt: "Solve for $x$: $4x - 9 = 15$",
-              points: 10,
-              options: ["$x = 1.5$", "$x = 6$", "$x = 24$", "$x = -6$"],
-              correctAnswer: "1"
-            },
-            {
-              id: "q2",
-              type: "tf",
-              prompt: "True or False: The line $y = 3x - 2$ passes through the point $(0, -2)$.",
-              points: 10,
-              correctAnswer: "True"
-            },
-            {
-              id: "q3",
-              type: "fill",
-              prompt: "Find the slope $m$ of a line passing through $(2, 4)$ and $(5, 13)$. Enter just the number.",
-              points: 10,
-              correctAnswer: "3"
-            },
-            {
-              id: "q4",
-              type: "open",
-              prompt: "Explain in 2–3 sentences how you know whether a line slopes upward or downward just by looking at its equation in $y = mx + b$ form.",
-              points: 15,
-              correctAnswer: ""
-            }
-          ]
-        },
-        {
-          id: "asg_202",
-          studentId: "stu_1",
-          subject: "Physical Science",
-          title: "Forces & Motion Checkpoint Quiz (Strict Mode)",
-          type: "Quiz",
-          dueDate: "2026-11-21",
-          linkedLessonId: "les_102",
-          strictMode: true,
-          allowProjectLink: false,
-          questions: [
-            {
-              id: "q1",
-              type: "mcq",
-              prompt: "A $20\\text{ kg}$ crate accelerates at $3\\text{ m/s}^2$. What is the net force acting on it?",
-              points: 15,
-              options: ["$6.67\\text{ N}$", "$23\\text{ N}$", "$60\\text{ N}$", "$17\\text{ N}$"],
-              correctAnswer: "2"
-            },
-            {
-              id: "q2",
-              type: "tf",
-              prompt: "True or False: An object moving at a constant velocity in a straight line has zero net force acting on it.",
-              points: 15,
-              correctAnswer: "True"
-            },
-            {
-              id: "q3",
-              type: "open",
-              prompt: "Give a real-world example of Newton's Second Law involving sports or bicycles, and identify the force, mass, and acceleration.",
-              points: 20,
-              correctAnswer: ""
-            }
-          ]
-        }
-      ],
+      lessons: [],
+      assignments: [],
       submissions: {},
-      readingLogs: [
-        {
-          id: "read_1",
-          studentId: "stu_1",
-          title: "The Giver",
-          author: "Lois Lowry",
-          pages: 240,
-          dateFinished: "2026-10-18",
-          rating: 5,
-          reflection: "Jonas realizing what memories and colors really mean made me think about why rules exist in society."
-        }
-      ],
-      activityLogs: [
-        {
-          id: "act_1",
-          studentId: "stu_1",
-          date: "2026-11-14",
-          type: "Club / Leadership",
-          organization: "School Leadership Club",
-          description: "Color Guard practice and uniform inspection preparation",
-          hours: 2.5,
-          verifiedByParent: true
-        }
-      ],
-      portfolioShowcase: [
-        {
-          id: "port_1",
-          studentId: "stu_1",
-          subject: "Physical Science",
-          title: "Newton's Laws Force Diagram Poster",
-          date: "2026-11-15",
-          description: "Illustrated free-body force diagrams showing balanced vs. unbalanced forces on a downhill skateboard.",
-          linkUrl: ""
-        }
-      ]
+      readingLogs: [],
+      activityLogs: [],
+      portfolioShowcase: []
     };
 
     // App Runtime State
@@ -536,7 +370,7 @@
       toast.textContent = "✓ " + msg;
       toast.style.opacity = "1";
       clearTimeout(toast._timer);
-      toast._timer = setTimeout(() => { toast.style.opacity = "0"; }, 2600);
+      toast._timer = setTimeout(() => { toast.style.opacity = "0"; }, 3000);
     }
 
     function resolveUserAccess(user) {
@@ -1272,7 +1106,7 @@
     };
 
     // =========================================================================
-    // 10. PARENT BUILDER, SCHEDULE, RESOURCES, SYLLABUS & GRADING ACTIONS
+    // 10. PARENT BUILDER, SCHEDULE, RESOURCES, SYLLABUS, CSV IMPORT & GRADING
     // =========================================================================
     let builderQuestions = [
       { id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }
@@ -1537,6 +1371,147 @@
       const rawSubj = document.getElementById("set_subjects").value;
       appState.settings.subjects = rawSubj.split(",").map(s => s.trim()).filter(Boolean);
       saveState("School settings saved!");
+    };
+
+    // --- CSV CURRICULUM IMPORTER & TEMPLATE DOWNLOADER ---
+    function parseCSVRows(text) {
+      const rows = [];
+      let row = [], val = "", inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i], next = text[i + 1];
+        if (ch === '"' && inQuotes && next === '"') { val += '"'; i++; }
+        else if (ch === '"') { inQuotes = !inQuotes; }
+        else if (ch === ',' && !inQuotes) { row.push(val.trim()); val = ""; }
+        else if ((ch === '\n' || (ch === '\r' && next === '\n')) && !inQuotes) {
+          if (ch === '\r') i++;
+          row.push(val.trim());
+          if (row.some(c => c !== "")) rows.push(row);
+          row = []; val = "";
+        } else { val += ch; }
+      }
+      if (val !== "" || row.length > 0) {
+        row.push(val.trim());
+        if (row.some(c => c !== "")) rows.push(row);
+      }
+      return rows;
+    }
+
+    window.downloadCurriculumCSVTemplate = function() {
+      const sample = [
+        "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict",
+        'Schedule,Pre-Algebra,Pre-Algebra Morning Block,Monday,09:00-10:00,Independent Study,,,,',
+        'Lesson,Pre-Algebra,Week 1: Sample Lesson,2026-11-30,,"### Lesson Notes\\nWrite notes here.",mcq,Choice A | Choice B | Choice C | Choice D,1,Quick Check: Sample question?',
+        'Assignment,Pre-Algebra,Mon 11/30 Daily Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10'
+      ].join("\n");
+      const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sunshine-homeschool-template.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    window.handleCurriculumCSVUpload = function(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const rows = parseCSVRows(e.target.result || "");
+        if (rows.length < 2) {
+          alert("CSV file appears empty.");
+          return;
+        }
+        const defaultStuId = appState.settings.students?.[0]?.id || "stu_1";
+        const assignmentMap = {};
+        let lessonsAdded = 0, schedulesAdded = 0, questionsAdded = 0;
+
+        for (let i = 1; i < rows.length; i++) {
+          const [recTypeRaw, subjRaw, title, dateOrDay, subTypeOrTime, contentOrPrompt, qTypeRaw, optsRaw, corrRaw, ptsRaw] = rows[i];
+          const recType = (recTypeRaw || "").toLowerCase();
+          const subj = subjRaw || "General";
+
+          if (subj && subj !== "All Subjects" && !appState.settings.subjects.includes(subj)) {
+            appState.settings.subjects.push(subj);
+          }
+
+          if (recType === "schedule") {
+            const [startTime = "09:00", endTime = "10:00"] = (subTypeOrTime || "09:00-10:00").split("-").map(s => s.trim());
+            appState.schedule.push({
+              id: "sch_" + Date.now() + "_" + i,
+              day: dateOrDay || "Monday",
+              startTime,
+              endTime,
+              title: title || "Study Block",
+              category: contentOrPrompt || "Independent Study",
+              subject: subj
+            });
+            schedulesAdded++;
+          } else if (recType === "lesson") {
+            const opts = optsRaw ? optsRaw.split("|").map(s => s.trim()) : [];
+            const hasCheck = Boolean(ptsRaw && opts.length >= 2);
+            appState.lessons.unshift({
+              id: "les_" + Date.now() + "_" + i,
+              studentId: defaultStuId,
+              subject: subj,
+              title: title || "Untitled Lesson",
+              date: dateOrDay || new Date().toISOString().slice(0, 10),
+              content: (contentOrPrompt || "").replace(/\\n/g, "\n"),
+              youtubeUrl: "",
+              resourceLink: "",
+              imageUrl: "",
+              checkQuestion: {
+                enabled: hasCheck,
+                prompt: hasCheck ? ptsRaw : "",
+                options: hasCheck ? [opts[0] || "", opts[1] || "", opts[2] || "", opts[3] || ""] : ["", "", "", ""],
+                correctIndex: Number(corrRaw) || 0
+              },
+              completedBy: {}
+            });
+            lessonsAdded++;
+          } else if (recType === "assignment") {
+            const key = `${subj}||${title}||${dateOrDay}`;
+            const strictFlag = (ptsRaw || "").toUpperCase().includes("STRICT");
+            const ptsNum = parseInt((ptsRaw || "10").replace(/\D/g, ""), 10) || 10;
+
+            if (!assignmentMap[key]) {
+              assignmentMap[key] = {
+                id: "asg_" + Date.now() + "_" + i,
+                studentId: defaultStuId,
+                subject: subj,
+                title: title || "Untitled Assignment",
+                type: subTypeOrTime || "Homework",
+                dueDate: dateOrDay || new Date().toISOString().slice(0, 10),
+                linkedLessonId: "",
+                strictMode: strictFlag,
+                allowProjectLink: true,
+                questions: []
+              };
+            } else if (strictFlag) {
+              assignmentMap[key].strictMode = true;
+            }
+
+            if (contentOrPrompt) {
+              const qType = (qTypeRaw || "mcq").toLowerCase();
+              assignmentMap[key].questions.push({
+                id: "q_" + Date.now() + "_" + i,
+                type: qType,
+                prompt: contentOrPrompt,
+                points: ptsNum,
+                options: qType === "mcq" && optsRaw ? optsRaw.split("|").map(s => s.trim()) : [],
+                correctAnswer: corrRaw || ""
+              });
+              questionsAdded++;
+            }
+          }
+        }
+
+        const newAssignments = Object.values(assignmentMap);
+        appState.assignments.unshift(...newAssignments);
+        event.target.value = "";
+        saveState(`Imported ${lessonsAdded} lessons, ${newAssignments.length} assignments (${questionsAdded} Qs), & ${schedulesAdded} schedule blocks!`);
+      };
+      reader.readAsText(file);
     };
 
     window.exportJSONBackup = function() {
@@ -2809,9 +2784,16 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Manage announcements, schedule &amp; Google Calendar sync, lessons, quizzes, grades, and student Gmail access.</p>
+              <p class="text-sm text-slate-500">Upload CSV curriculum plans, manage schedules &amp; Google Calendar sync, build quizzes, grade work, and manage student Gmail access.</p>
             </div>
             <div class="flex flex-wrap gap-2">
+              <label class="px-3.5 py-2 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold cursor-pointer shadow-sm">
+                ⬆ Import Curriculum (CSV)
+                <input type="file" accept=".csv" onchange="handleCurriculumCSVUpload(event)" class="hidden" />
+              </label>
+              <button onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                📄 CSV Template
+              </button>
               <button onclick="exportGradesCSV()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
                 ⬇ Export Grades (CSV)
               </button>
@@ -2894,7 +2876,7 @@
                   <button onclick="setParentTab('create-lesson')" class="text-xs font-bold text-tealhub-600 hover:underline">+ Add Lesson</button>
                 </div>
                 <div class="space-y-3">
-                  ${(appState.lessons || []).length === 0 ? `<p class="text-xs text-slate-400 italic">No lessons yet. Click "+ Add Lesson" to create one.</p>` : ''}
+                  ${(appState.lessons || []).length === 0 ? `<p class="text-xs text-slate-400 italic">No lessons yet. Click "+ Add Lesson" or "Import Curriculum (CSV)" above.</p>` : ''}
                   ${(appState.lessons || []).map(l => {
                     const targetStu = l.studentId === "ALL" ? "All Students" : (getStudentById(l.studentId)?.name || "Student");
                     return `
@@ -2922,7 +2904,7 @@
                   <button onclick="setParentTab('create-assignment')" class="text-xs font-bold text-tealhub-600 hover:underline">+ Add Assignment</button>
                 </div>
                 <div class="space-y-3">
-                  ${(appState.assignments || []).length === 0 ? `<p class="text-xs text-slate-400 italic">No assignments yet. Click "+ Add Assignment" to create one.</p>` : ''}
+                  ${(appState.assignments || []).length === 0 ? `<p class="text-xs text-slate-400 italic">No assignments yet. Click "+ Add Assignment" or "Import Curriculum (CSV)" above.</p>` : ''}
                   ${(appState.assignments || []).map(a => {
                     const targetStu = a.studentId === "ALL" ? "All Students" : (getStudentById(a.studentId)?.name || "Student");
                     return `
