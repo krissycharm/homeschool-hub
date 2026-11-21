@@ -98,7 +98,7 @@
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-tealhub-500/20 selection:text-ink relative overflow-x-hidden">
 
-  <!-- Decorative Subtle Studio Doodles (Stars, Pencils & Leaves matching mockup) -->
+  <!-- Decorative Subtle Studio Doodles -->
   <div class="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-45 no-print" aria-hidden="true">
     <svg class="absolute top-20 left-4 w-24 h-24 text-amber-400" viewBox="0 0 100 100" fill="currentColor">
       <polygon points="25,5 30,20 45,20 33,29 37,44 25,35 13,44 17,29 5,20 20,20" stroke="#475569" stroke-width="2"/>
@@ -145,7 +145,7 @@
   </div>
 
   <!-- =====================================================================
-       PARENT PIN MODAL
+       PARENT PIN MODAL (SECONDARY PROTECTION EVEN WHEN SIGNED IN)
   ====================================================================== -->
   <div id="parent-pin-modal" class="fixed inset-0 z-40 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 no-print">
     <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
@@ -153,7 +153,7 @@
         <h3 class="text-lg font-display font-extrabold text-slate-900">Parent / Teacher Access</h3>
         <button onclick="closeParentPinModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
-      <p class="text-sm text-slate-600 mb-4">Enter your Parent PIN to manage students, schedule, lessons, quizzes, and grades. <span class="text-xs text-slate-400">(Default PIN: 1234)</span></p>
+      <p class="text-sm text-slate-600 mb-4">Enter your Parent PIN to open the Teacher Workspace. <span class="text-xs text-slate-400">(Default PIN: 1234)</span></p>
       <input type="password" id="parent-login-pin" maxlength="8" placeholder="••••"
         onkeydown="if(event.key==='Enter') verifyParentLogin()"
         class="w-full text-center text-2xl tracking-widest font-bold px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-tealhub-500 outline-none mb-3" />
@@ -166,11 +166,10 @@
   </div>
 
   <!-- =====================================================================
-       TOP NAVIGATION HEADER (MATCHING MOCKUP STYLE)
+       TOP NAVIGATION HEADER
   ====================================================================== -->
   <header class="relative z-20 pt-4 pb-2 no-print">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 flex flex-wrap items-center justify-between gap-3">
-      <!-- Brand / Student Hub Title -->
       <div class="flex items-center gap-3">
         <div class="w-11 h-11 rounded-full bg-amberwarm-400 border-2 border-white shadow-sm flex items-center justify-center text-xl">
           ☀️
@@ -179,18 +178,17 @@
           <h1 id="header-main-title" class="font-display font-extrabold text-xl sm:text-2xl text-ink tracking-tight">
             Sunshine Homeschool Hub
           </h1>
-          <p class="text-xs font-medium text-slate-600">Learning &amp; Portfolio Studio</p>
+          <p class="text-xs font-medium text-slate-600" id="header-user-email">Google Workspace Connected</p>
         </div>
       </div>
 
-      <!-- Right Controls: Sync Pill + Student/Parent Switcher -->
-      <div class="flex items-center gap-2.5">
+      <div id="header-controls" class="flex items-center gap-2.5">
         <span id="sync-status-badge" class="hidden sm:inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-white/80 text-amberwarm-600 shadow-sm">
           <span class="w-2 h-2 rounded-full bg-amberwarm-500"></span>
-          Local Demo Mode
+          Connecting...
         </span>
 
-        <div class="bg-white/85 backdrop-blur p-1 rounded-2xl flex items-center text-xs sm:text-sm font-bold shadow-sm border border-white">
+        <div id="role-switcher-box" class="hidden bg-white/85 backdrop-blur p-1 rounded-2xl flex items-center text-xs sm:text-sm font-bold shadow-sm border border-white">
           <button id="btn-role-student" onclick="switchToStudentView()"
             class="px-3.5 py-1.5 rounded-xl bg-tealhub-500 text-white shadow-sm transition">
             Student Hub
@@ -200,6 +198,11 @@
             Parent Hub
           </button>
         </div>
+
+        <button id="btn-sign-out" onclick="signOutGoogleUser()"
+          class="hidden text-xs font-bold text-slate-600 hover:text-red-600 bg-white/85 hover:bg-white px-3 py-2 rounded-xl shadow-sm transition">
+          Sign Out
+        </button>
       </div>
     </div>
   </header>
@@ -212,34 +215,41 @@
   </main>
 
   <!-- =====================================================================
-       FIREBASE & APPLICATION LOGIC
+       FIREBASE AUTH + REALTIME DATABASE & APPLICATION LOGIC
   ====================================================================== -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
     import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
 
     // =========================================================================
-    // 1. FIREBASE CONFIGURATION (PASTE YOUR FREE FIREBASE KEYS HERE)
+    // 1. FIREBASE CONFIGURATION & WHITELISTED GMAIL ACCOUNTS
     // =========================================================================
-  const firebaseConfig = {
-    apiKey: "AIzaSyDscZ7MgKhibd8NTCCm4syElUaTj9o3KTk",
-    authDomain: "sunshine-homeschool.firebaseapp.com",
-    databaseURL: "https://sunshine-homeschool-default-rtdb.firebaseio.com",
-    projectId: "sunshine-homeschool",
-    storageBucket: "sunshine-homeschool.firebasestorage.app",
-    messagingSenderId: "345084784786",
-    appId: "1:345084784786:web:b2a176cb9dde61be40f64b"
-  };
+const firebaseConfig = {
+  apiKey: "AIzaSyDscZ7MgKhibd8NTCCm4syElUaTj9o3KTk",
+  authDomain: "sunshine-homeschool.firebaseapp.com",
+  databaseURL: "https://sunshine-homeschool-default-rtdb.firebaseio.com",
+  projectId: "sunshine-homeschool",
+  storageBucket: "sunshine-homeschool.firebasestorage.app",
+  messagingSenderId: "345084784786",
+  appId: "1:345084784786:web:b2a176cb9dde61be40f64b"
+};
+
+    // Map each allowed Gmail address to its role ('parent' or 'student') & studentId
+    const FAMILY_GOOGLE_ACCOUNTS = {};
 
     const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.databaseURL);
     let db = null;
     let dbRef = null;
+    let auth = null;
+    const googleProvider = new GoogleAuthProvider();
 
     if (isFirebaseConfigured) {
       try {
         const app = initializeApp(firebaseConfig);
         db = getDatabase(app);
         dbRef = ref(db, 'sunshine_homeschool_v5');
+        auth = getAuth(app);
       } catch (err) {
         console.error("Firebase init error:", err);
       }
@@ -259,8 +269,8 @@
           {
             id: "ann_1",
             date: "2026-11-20",
-            title: "Friday Wrap-Up & Science Quiz Reminder",
-            body: "Finish your Pre-Algebra linear equations practice before 2:00 PM today, and make sure your laptop is charged for the Forces & Motion Strict Quiz!"
+            title: "Welcome to Sunshine Homeschool!",
+            body: "Your lessons, assignments, and Google Calendar schedule are synced to your Google account."
           }
         ],
         subjects: ["Pre-Algebra", "Physical Science", "English & Literature", "U.S. History", "Spanish I", "Electives & JROTC"],
@@ -290,14 +300,14 @@
             currentUnit: "Semester Project & Community Service"
           }
         },
-        students: [
-          {
-            id: "stu_isabel",
-            name: "Isabel",
-            gradeLevel: "8th Grade",
-            pin: "2468"
-          }
-        ]
+   students: [
+  {
+    id: "stu_1",
+    name: "Student",
+    gradeLevel: "8th Grade",
+    email: ""
+  }
+]
       },
       schedule: [
         { id: "sch_1", day: "Monday", startTime: "09:00", endTime: "10:00", title: "Pre-Algebra Independent Study", category: "Independent Study", subject: "Pre-Algebra" },
@@ -310,16 +320,16 @@
         { id: "sch_8", day: "Friday", startTime: "09:00", endTime: "11:30", title: "Weekly Checkpoint Quizzes & Reading Log", category: "Independent Study", subject: "All Subjects" }
       ],
       resources: [
-        { id: "res_1", title: "Khan Academy — 8th Grade Math", category: "Math & Science", url: "https://www.khanacademy.org/math/cc-eighth-grade-math", notes: "Sign in with student Google account for mastery points." },
+        { id: "res_1", title: "Khan Academy — 8th Grade Math", category: "Math & Science", url: "https://www.khanacademy.org/math/cc-eighth-grade-math", notes: "Sign in with your Gmail account for mastery points." },
         { id: "res_2", title: "FLVS Student Portal (VSA)", category: "Virtual Courses", url: "https://login.flvs.net/", notes: "Check course announcements and DBA schedules." },
-        { id: "res_3", title: "PhET Interactive Science Simulations", category: "Math & Science", url: "https://phet.colorado.edu/", notes: "Free physics and chemistry virtual labs." },
-        { id: "res_4", title: "Desmos Graphing Calculator", category: "Study Tools", url: "https://www.desmos.com/calculator", notes: "Use for graphing linear equations during homework (not permitted during Strict Tests)." },
-        { id: "res_5", title: "Purdue OWL Writing & Citation Guide", category: "Language Arts & History", url: "https://owl.purdue.edu/", notes: "Reference for MLA formatting and essay structure." }
+        { id: "res_3", title: "Google Drive — My School Folder", category: "Google Workspace", url: "https://drive.google.com/", notes: "Store essays, slideshows, and project photos here to attach to assignments." },
+        { id: "res_4", title: "Google Docs — Essay & Notes", category: "Google Workspace", url: "https://docs.google.com/", notes: "Create and share written reports." },
+        { id: "res_5", title: "Desmos Graphing Calculator", category: "Study Tools", url: "https://www.desmos.com/calculator", notes: "Use for graphing linear equations during homework (not permitted during Strict Tests)." }
       ],
       lessons: [
         {
           id: "les_101",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           subject: "Pre-Algebra",
           title: "Solving Multi-Step Linear Equations & Slope",
           date: "2026-11-20",
@@ -337,7 +347,7 @@
         },
         {
           id: "les_102",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           subject: "Physical Science",
           title: "Newton's Second Law: Force, Mass & Acceleration",
           date: "2026-11-20",
@@ -352,27 +362,14 @@
             correctIndex: 2
           },
           completedBy: {
-            stu_isabel: "2026-11-19T14:20:00.000Z"
+            stu_1: "2026-11-19T14:20:00.000Z"
           }
-        },
-        {
-          id: "les_103",
-          studentId: "stu_isabel",
-          subject: "English & Literature",
-          title: "Analyzing Theme & Symbolism in Modern Fiction",
-          date: "2026-11-20",
-          content: `Authors rarely state the central theme of a novel directly—instead, they weave recurring symbols and character choices throughout the story.\n\n### Key Questions to Ask While Reading\n* **Recurring Objects or Colors:** Does an object or color appear during turning points?\n* **Character Decisions:** What does the protagonist sacrifice, and what does that reveal about the author's message?`,
-          youtubeUrl: "",
-          resourceLink: "",
-          imageUrl: "",
-          checkQuestion: { enabled: false },
-          completedBy: {}
         }
       ],
       assignments: [
         {
           id: "asg_201",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           subject: "Pre-Algebra",
           title: "Linear Equations & Slope Practice Set",
           type: "Homework",
@@ -414,7 +411,7 @@
         },
         {
           id: "asg_202",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           subject: "Physical Science",
           title: "Forces & Motion Checkpoint Quiz (Strict Mode)",
           type: "Quiz",
@@ -452,7 +449,7 @@
       readingLogs: [
         {
           id: "read_1",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           title: "The Giver",
           author: "Lois Lowry",
           pages: 240,
@@ -464,29 +461,19 @@
       activityLogs: [
         {
           id: "act_1",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           date: "2026-11-14",
           type: "Club / Leadership",
-          organization: "Workman Middle JROTC",
+          organization: "School Club: Middle JROTC",
           description: "Color Guard practice and uniform inspection preparation",
           hours: 2.5,
-          verifiedByParent: true
-        },
-        {
-          id: "act_2",
-          studentId: "stu_isabel",
-          date: "2026-11-08",
-          type: "Community Service",
-          organization: "Local Animal Shelter Supply Drive",
-          description: "Sorted donated blankets, towels, and pet food supplies",
-          hours: 3.0,
           verifiedByParent: true
         }
       ],
       portfolioShowcase: [
         {
           id: "port_1",
-          studentId: "stu_isabel",
+          studentId: "stu_1",
           subject: "Physical Science",
           title: "Newton's Laws Force Diagram Poster",
           date: "2026-11-15",
@@ -498,18 +485,20 @@
 
     // App Runtime State
     let appState = loadLocalState();
+    let currentGoogleUser = null;       // Firebase User object
+    let authStatus = isFirebaseConfigured ? "loading" : "demo"; // 'loading' | 'signed_out' | 'unauthorized' | 'authorized' | 'demo'
+    let authErrorText = "";
+
     let currentRole = "student";        // 'student' | 'parent'
-    let authenticatedStudentId = null;
-    let loginSelectedStudentId = appState.settings.students[0]?.id || "";
-    let loginErrorMsg = "";
+    let authenticatedStudentId = appState.settings.students[0]?.id || "stu_1";
 
     // 8 Essential Daily Tabs for Student Portal
-    let studentTab = "home";            // 'home' | 'schedule' | 'subjects' | 'assignments' | 'resources' | 'portfolio' | 'reading' | 'activities'
+    let studentTab = "home";
     let activeCourseSubject = appState.settings.subjects[0] || "Pre-Algebra";
-    let assignmentFilterTab = "todo";   // 'todo' | 'in_progress' | 'completed'
+    let assignmentFilterTab = "todo";
 
     // Parent Hub Tabs
-    let parentTab = "overview";         // 'overview' | 'create-lesson' | 'create-assignment' | 'schedule-hub' | 'gradebook' | 'students'
+    let parentTab = "overview";
     let parentStudentFilter = "All";
 
     // Detail Viewers
@@ -518,8 +507,8 @@
     let activeReviewKey = null;
     let printableRecord = null;
 
-    // Interactive 5:00 Brain Break Timer State
-    let breakTimerSeconds = 300; // 5:00
+    // Brain Break Timer State
+    let breakTimerSeconds = 300;
     let breakTimerRunning = false;
     let breakTimerInterval = null;
 
@@ -534,29 +523,42 @@
     };
 
     // =========================================================================
-    // 3. DATA PERSISTENCE (FIREBASE + LOCALSTORAGE FALLBACK)
+    // 3. GOOGLE AUTHENTICATION & FIREBASE REALTIME SYNC
     // =========================================================================
-    function loadLocalState() {
-      try {
-        const saved = localStorage.getItem("sunshine_homeschool_state_v5");
-        if (saved) return JSON.parse(saved);
-      } catch (e) {}
-      return structuredClone(DEFAULT_STATE);
-    }
+    function resolveUserAccess(user) {
+      const email = (user.email || "").toLowerCase().trim();
+      const whitelistKeys = Object.keys(FAMILY_GOOGLE_ACCOUNTS).map(k => k.toLowerCase().trim());
 
-    function saveState() {
-      localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
-      if (isFirebaseConfigured && dbRef) {
-        set(dbRef, appState).catch(err => console.error("Firebase write failed:", err));
+      // Check hardcoded whitelist OR student emails stored in Firebase settings
+      const matchedHardcoded = FAMILY_GOOGLE_ACCOUNTS[email];
+      const matchedStudentProfile = appState.settings.students.find(
+        s => (s.email || "").toLowerCase().trim() === email
+      );
+
+      // If whitelist is empty on first boot, allow the first signed-in Google user as Parent so you aren't locked out
+      if (whitelistKeys.length === 0 && !matchedStudentProfile) {
+        currentRole = "parent";
+        authenticatedStudentId = appState.settings.students[0]?.id || "stu_1";
+        return true;
       }
-      render();
+
+      if (matchedHardcoded) {
+        currentRole = matchedHardcoded.role || "student";
+        authenticatedStudentId = matchedHardcoded.studentId || appState.settings.students[0]?.id;
+        return true;
+      }
+
+      if (matchedStudentProfile) {
+        currentRole = "student";
+        authenticatedStudentId = matchedStudentProfile.id;
+        return true;
+      }
+
+      return false;
     }
 
-    if (isFirebaseConfigured && dbRef) {
-      const badge = document.getElementById("sync-status-badge");
-      badge.className = "hidden sm:inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-white/90 text-sage-700 shadow-sm";
-      badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-sage-500 animate-pulse"></span> Cloud Synced`;
-
+    function attachRealtimeListener() {
+      if (!isFirebaseConfigured || !dbRef) return;
       onValue(dbRef, (snapshot) => {
         const remoteData = snapshot.val();
         if (remoteData) {
@@ -577,15 +579,101 @@
             activityLogs: remoteData.activityLogs || [],
             portfolioShowcase: remoteData.portfolioShowcase || []
           };
-          if (!loginSelectedStudentId && appState.settings.students.length) {
-            loginSelectedStudentId = appState.settings.students[0].id;
-          }
           localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
           render();
         } else {
           set(dbRef, appState);
         }
+      }, (error) => {
+        console.error("Database read denied:", error);
+        authStatus = "unauthorized";
+        authErrorText = "This Gmail account is not authorized in your Firebase Database Rules.";
+        render();
       });
+    }
+
+    if (isFirebaseConfigured && auth) {
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          currentGoogleUser = user;
+          const allowed = resolveUserAccess(user);
+          if (allowed) {
+            authStatus = "authorized";
+            attachRealtimeListener();
+          } else {
+            authStatus = "unauthorized";
+            authErrorText = `The Gmail account (${user.email}) is not on the Sunshine Homeschool family list.`;
+          }
+        } else {
+          currentGoogleUser = null;
+          authStatus = "signed_out";
+        }
+        updateHeaderChrome();
+        render();
+      });
+    } else {
+      updateHeaderChrome();
+    }
+
+    window.signInWithGoogle = async function() {
+      if (!auth) return;
+      authErrorText = "";
+      try {
+        await signInWithPopup(auth, googleProvider);
+      } catch (err) {
+        console.error("Google sign-in failed:", err);
+        authErrorText = err.message || "Google sign-in popup was closed or blocked.";
+        render();
+      }
+    };
+
+    window.signOutGoogleUser = async function() {
+      exitStrictSessionCleanup();
+      if (auth) {
+        await signOut(auth);
+      }
+    };
+
+    function updateHeaderChrome() {
+      const badge = document.getElementById("sync-status-badge");
+      const switcher = document.getElementById("role-switcher-box");
+      const signOutBtn = document.getElementById("btn-sign-out");
+      const emailSub = document.getElementById("header-user-email");
+
+      if (authStatus === "authorized" && currentGoogleUser) {
+        badge.className = "hidden sm:inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-white/90 text-sage-700 shadow-sm";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-sage-500 animate-pulse"></span> Google Cloud Synced`;
+        switcher.classList.remove("hidden");
+        signOutBtn.classList.remove("hidden");
+        emailSub.textContent = `Signed in as ${currentGoogleUser.email}`;
+      } else if (authStatus === "demo") {
+        badge.className = "hidden sm:inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-white/80 text-amberwarm-600 shadow-sm";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amberwarm-500"></span> Local Demo Mode`;
+        switcher.classList.remove("hidden");
+        signOutBtn.classList.add("hidden");
+        emailSub.textContent = "Paste Firebase keys to enable Gmail Sign-In";
+      } else {
+        switcher.classList.add("hidden");
+        signOutBtn.classList.toggle("hidden", !currentGoogleUser);
+        emailSub.textContent = "Private Family Learning Studio";
+      }
+      updateRoleButtons();
+    }
+
+    function loadLocalState() {
+      try {
+        const saved = localStorage.getItem("sunshine_homeschool_state_v5");
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+      return structuredClone(DEFAULT_STATE);
+    }
+
+    function saveState() {
+      localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
+      if (isFirebaseConfigured && dbRef && authStatus === "authorized") {
+        set(dbRef, appState).catch(err => console.error("Firebase write failed:", err));
+      }
+      render();
     }
 
     // Helper Getters
@@ -609,7 +697,7 @@
     }
 
     // =========================================================================
-    // 4. BRAIN BREAK TIMER CONTROLS (5:00 COUNTDOWN)
+    // 4. BRAIN BREAK TIMER CONTROLS
     // =========================================================================
     function formatTimer(secs) {
       const m = Math.floor(secs / 60);
@@ -648,7 +736,7 @@
     };
 
     // =========================================================================
-    // 5. GOOGLE CALENDAR SYNC HELPERS (DIRECT LINKS + .ICS FILE GENERATOR)
+    // 5. GOOGLE CALENDAR SYNC HELPERS
     // =========================================================================
     const DAY_TO_RRULE = {
       Monday: "MO", Tuesday: "TU", Wednesday: "WE", Thursday: "TH", Friday: "FR", Saturday: "SA", Sunday: "SU"
@@ -865,47 +953,8 @@
     }
 
     // =========================================================================
-    // 8. AUTHENTICATION & NAVIGATION
+    // 8. ROLE SWITCHING & NAVIGATION
     // =========================================================================
-    window.selectStudentForLogin = function(stuId) {
-      loginSelectedStudentId = stuId;
-      loginErrorMsg = "";
-      render();
-      setTimeout(() => {
-        const input = document.getElementById("student-login-pin-input");
-        if (input) input.focus();
-      }, 30);
-    };
-
-    window.verifyStudentLogin = function() {
-      const targetId = loginSelectedStudentId || appState.settings.students[0]?.id;
-      const student = getStudentById(targetId);
-      const enteredPin = (document.getElementById("student-login-pin-input")?.value || "").trim();
-
-      if (!student) return;
-      if (enteredPin === String(student.pin)) {
-        authenticatedStudentId = student.id;
-        loginErrorMsg = "";
-        studentTab = "home";
-        activeLessonId = null;
-        activeAssignmentId = null;
-        render();
-      } else {
-        loginErrorMsg = "Incorrect Student PIN. Ask your teacher if you forgot your PIN.";
-        render();
-      }
-    };
-
-    window.lockStudentSession = function() {
-      exitStrictSessionCleanup();
-      authenticatedStudentId = null;
-      activeLessonId = null;
-      activeAssignmentId = null;
-      printableRecord = null;
-      loginErrorMsg = "";
-      render();
-    };
-
     window.openParentPinModal = function() {
       if (currentRole === "parent") return;
       document.getElementById("parent-login-pin").value = "";
@@ -948,6 +997,7 @@
     function updateRoleButtons() {
       const btnS = document.getElementById("btn-role-student");
       const btnP = document.getElementById("btn-role-parent");
+      if (!btnS || !btnP) return;
       if (currentRole === "student") {
         btnS.className = "px-3.5 py-1.5 rounded-xl bg-tealhub-500 text-white shadow-sm transition";
         btnP.className = "px-3.5 py-1.5 rounded-xl text-slate-600 hover:text-slate-900 transition";
@@ -973,7 +1023,6 @@
       render();
     };
 
-    // Quick toggle from Home "My Day" checklist checkboxes
     window.quickToggleLessonFromChecklist = function(lessonId) {
       const lesson = appState.lessons.find(l => l.id === lessonId);
       if (!lesson || !authenticatedStudentId) return;
@@ -1400,30 +1449,23 @@
       e.preventDefault();
       const name = document.getElementById("new_stu_name").value.trim();
       const gradeLevel = document.getElementById("new_stu_grade").value.trim() || "8th Grade";
-      const pin = document.getElementById("new_stu_pin").value.trim();
-      if (!name || pin.length < 4) {
-        alert("Please enter a student name and a PIN that is 4 to 8 digits long.");
-        return;
-      }
-      appState.settings.students.push({ id: "stu_" + Date.now(), name, gradeLevel, pin });
+      const email = document.getElementById("new_stu_email").value.trim().toLowerCase();
+      if (!name) return;
+      appState.settings.students.push({ id: "stu_" + Date.now(), name, gradeLevel, email });
       saveState();
     };
 
-    window.updateStudentPinAndInfo = function(stuId) {
+    window.updateStudentInfo = function(stuId) {
       const stu = appState.settings.students.find(s => s.id === stuId);
       if (!stu) return;
       const newName = document.getElementById(`edit_stu_name_${stuId}`).value.trim();
       const newGrade = document.getElementById(`edit_stu_grade_${stuId}`).value.trim();
-      const newPin = document.getElementById(`edit_stu_pin_${stuId}`).value.trim();
-      if (newPin.length < 4) {
-        alert("Student PIN must be at least 4 characters.");
-        return;
-      }
+      const newEmail = document.getElementById(`edit_stu_email_${stuId}`).value.trim().toLowerCase();
       if (newName) stu.name = newName;
       if (newGrade) stu.gradeLevel = newGrade;
-      stu.pin = newPin;
+      stu.email = newEmail;
       saveState();
-      alert(`Updated ${stu.name}'s profile and PIN!`);
+      alert(`Updated ${stu.name}'s profile!`);
     };
 
     window.removeStudent = function(stuId) {
@@ -1566,19 +1608,27 @@
       const root = document.getElementById("app-root");
       const headerTitle = document.getElementById("header-main-title");
 
-      if (currentRole === "student" && authenticatedStudentId) {
+      if ((authStatus === "authorized" || authStatus === "demo") && currentRole === "student") {
         const stu = getStudentById(authenticatedStudentId);
         headerTitle.textContent = `${stu.name}'s Homeschool Hub`;
       } else {
         headerTitle.textContent = "Sunshine Homeschool Hub";
       }
 
+      if (authStatus === "loading") {
+        root.innerHTML = `<div class="text-center py-20 text-slate-600 font-display font-bold">Checking Google Workspace session...</div>`;
+        return;
+      }
+
+      if (authStatus === "signed_out" || authStatus === "unauthorized") {
+        root.innerHTML = renderGoogleSignInGate();
+        return;
+      }
+
       if (printableRecord) {
         root.innerHTML = renderPrintablePortfolioView();
       } else if (currentRole === "student") {
-        if (!authenticatedStudentId) {
-          root.innerHTML = renderStudentLoginGate();
-        } else if (activeLessonId) {
+        if (activeLessonId) {
           root.innerHTML = renderStudentLessonDetail(activeLessonId);
         } else if (activeAssignmentId) {
           root.innerHTML = renderStudentAssignmentDetail(activeAssignmentId);
@@ -1597,50 +1647,41 @@
     }
 
     // -------------------------------------------------------------------------
-    // VIEW 0: PRIVATE STUDENT PIN LOGIN GATE
+    // VIEW 0: GOOGLE WORKSPACE / GMAIL SIGN-IN GATE
     // -------------------------------------------------------------------------
-    function renderStudentLoginGate() {
-      const students = appState.settings.students;
-      if (!students.some(s => s.id === loginSelectedStudentId)) {
-        loginSelectedStudentId = students[0]?.id || "";
-      }
-      const chosen = getStudentById(loginSelectedStudentId);
-
+    function renderGoogleSignInGate() {
       return `
-        <div class="max-w-md mx-auto my-8 bg-white rounded-3xl p-8 border border-white shadow-md text-center">
+        <div class="max-w-md mx-auto my-10 bg-white rounded-3xl p-8 sm:p-10 border border-white shadow-md text-center">
           <div class="w-16 h-16 rounded-full bg-amberwarm-400/20 text-amberwarm-600 flex items-center justify-center mx-auto mb-4 text-3xl border-2 border-amberwarm-400">
             ☀️
           </div>
           <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool Hub</h2>
-          <p class="text-sm text-slate-500 mt-1 mb-6">Choose your profile and enter your private Student PIN to start today's quest.</p>
+          <p class="text-sm text-slate-500 mt-2 mb-6 leading-relaxed">
+            Sign in with your authorized family Gmail account to sync lessons, Google Calendar schedules, and portfolio records.
+          </p>
 
-          <div class="flex flex-wrap justify-center gap-2 mb-6">
-            ${students.map(stu => `
-              <button type="button" onclick="selectStudentForLogin('${stu.id}')"
-                class="px-4 py-2.5 rounded-2xl text-sm font-bold transition border ${
-                  stu.id === chosen?.id
-                    ? 'bg-tealhub-500 text-white border-tealhub-500 shadow-sm'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }">
-                ${stu.name} <span class="text-xs font-normal opacity-85">(${stu.gradeLevel})</span>
-              </button>
-            `).join("")}
-          </div>
+          ${authErrorText ? `
+            <div class="mb-5 p-4 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 font-semibold">
+              ${authErrorText}
+            </div>
+          ` : ''}
 
-          <div class="bg-skyhub/40 rounded-2xl p-5 border border-slate-200/80 mb-4">
-            <label class="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">
-              ${chosen ? `${chosen.name}'s Student PIN` : 'Student PIN'}
-            </label>
-            <input type="password" id="student-login-pin-input" maxlength="8" placeholder="••••"
-              onkeydown="if(event.key==='Enter') verifyStudentLogin()"
-              class="w-full text-center text-2xl tracking-widest font-bold px-4 py-3 rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-tealhub-500 outline-none" />
-            ${loginErrorMsg ? `<p class="text-red-600 text-xs font-semibold mt-2">${loginErrorMsg}</p>` : ''}
-          </div>
-
-          <button onclick="verifyStudentLogin()"
-            class="w-full py-3.5 rounded-2xl bg-sage-500 hover:bg-sage-600 text-white font-display font-extrabold text-base shadow-sm transition">
-            Unlock My Hub →
+          <button onclick="signInWithGoogle()"
+            class="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-50 text-ink font-display font-extrabold text-sm border-2 border-slate-200 shadow-sm transition flex items-center justify-center gap-3">
+            <svg class="w-5 h-5" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
+              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"/>
+              <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"/>
+              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"/>
+            </svg>
+            Sign in with Google
           </button>
+
+          ${authStatus === "unauthorized" ? `
+            <button onclick="signOutGoogleUser()" class="mt-4 text-xs font-bold text-slate-500 hover:underline">
+              Switch to a different Gmail account
+            </button>
+          ` : ''}
         </div>
       `;
     }
@@ -1665,7 +1706,6 @@
       ];
 
       return `
-        <!-- Clean Underline + Pill Tab Bar matching Mockup Top Navigation -->
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-400/25">
           <nav class="flex items-center gap-1 sm:gap-2 overflow-x-auto py-1">
             ${navItems.map(item => `
@@ -1681,13 +1721,14 @@
             `).join("")}
           </nav>
 
-          <button onclick="lockStudentSession()"
-            class="text-xs font-bold text-slate-600 hover:text-ink bg-white/80 hover:bg-white px-3 py-1.5 rounded-xl shadow-sm transition">
-            🔒 Switch Student
-          </button>
+          ${appState.settings.students.length > 1 ? `
+            <select onchange="authenticatedStudentId=this.value; render();"
+              class="text-xs font-bold text-slate-700 bg-white/85 px-3 py-1.5 rounded-xl border border-white shadow-sm">
+              ${appState.settings.students.map(s => `<option value="${s.id}" ${s.id === student.id ? 'selected' : ''}>Viewing: ${s.name}</option>`).join("")}
+            </select>
+          ` : ''}
         </div>
 
-        <!-- Render Active Tab Body -->
         ${studentTab === "home" ? renderTabHome(student, metrics) : ''}
         ${studentTab === "schedule" ? renderTabSchedule(student) : ''}
         ${studentTab === "subjects" ? renderTabSubjects(student, metrics) : ''}
@@ -1699,9 +1740,8 @@
       `;
     }
 
-    // --- TAB 1: DASHBOARD (HOME) — DESIGNED TO MATCH YOUR MOCKUP ---
+    // --- TAB 1: DASHBOARD (HOME) ---
     function renderTabHome(student, metrics) {
-      // Group lessons + assignments by subject so each subject gets a colorful card in "My Day" Checklist
       const cardThemes = [
         { headerBg: "bg-terracotta-500", barBg: "bg-amberwarm-400", icon: "🧮" },
         { headerBg: "bg-tealhub-500", barBg: "bg-tealhub-500", icon: "🧪" },
@@ -1734,7 +1774,6 @@
       const fourthTasks = getTasksForSubject(fourthSubject);
 
       return `
-        <!-- Optional Announcement Strip -->
         ${appState.settings.announcements.length > 0 ? `
           <div class="mb-5 bg-white/90 backdrop-blur rounded-2xl px-5 py-3.5 border border-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div class="flex items-center gap-2.5 text-xs sm:text-sm">
@@ -1747,13 +1786,9 @@
         ` : ''}
 
         <div class="grid lg:grid-cols-12 gap-6 items-start">
-          <!-- ===============================================================
-               LEFT 8 COLUMNS: "My Day" Checklist + Wide Subject Card + Break Timer
-          ================================================================ -->
           <div class="lg:col-span-8 space-y-5">
             <h2 class="font-display font-extrabold text-xl sm:text-2xl text-ink">“My Day” Checklist</h2>
 
-            <!-- Top 3 Subject Cards (Terracotta, Teal, Forest Sage) -->
             <div class="grid sm:grid-cols-3 gap-4">
               ${topThreeSubjects.map((subj, idx) => {
                 const theme = cardThemes[idx % cardThemes.length];
@@ -1765,7 +1800,6 @@
                 return `
                   <div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
                     <div>
-                      <!-- Colored Card Header -->
                       <div class="${theme.headerBg} px-4 py-3.5 text-white flex items-center gap-3">
                         <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl shrink-0">
                           ${theme.icon}
@@ -1773,7 +1807,6 @@
                         <h3 class="font-display font-extrabold text-base leading-tight">${subj}</h3>
                       </div>
 
-                      <!-- Task Checklist -->
                       <div class="p-4 space-y-2.5">
                         ${tasks.length === 0 ? `<p class="text-xs text-slate-400 italic py-2">No tasks scheduled today.</p>` : ''}
                         ${tasks.slice(0, 3).map(t => `
@@ -1790,7 +1823,6 @@
                       </div>
                     </div>
 
-                    <!-- Card Footer: Start Button + Earn Points Ribbon + Progress Bar -->
                     <div class="px-4 pb-4 pt-1 space-y-3">
                       ${nextTask ? `
                         <div class="text-center">
@@ -1815,9 +1847,7 @@
               }).join("")}
             </div>
 
-            <!-- Bottom Row: Wide 4th Subject Card + Interactive 5:00 Break Timer -->
             <div class="grid sm:grid-cols-12 gap-4">
-              <!-- Wide Subject Card (7 cols) -->
               <div class="sm:col-span-7 bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
                 <div class="bg-sage-500 px-5 py-3 text-white flex items-center gap-3">
                   <span class="text-lg">📚</span>
@@ -1848,7 +1878,6 @@
                 </div>
               </div>
 
-              <!-- Break Timer Card (5 cols — matching Mockup Orange Card) -->
               <div class="sm:col-span-5 bg-amberwarm-400 rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
                 <div class="bg-terracotta-500 px-4 py-2.5 text-white font-display font-extrabold text-sm">
                   Break Timer
@@ -1878,46 +1907,37 @@
             </div>
           </div>
 
-          <!-- ===============================================================
-               RIGHT 4 COLUMNS: Quick Launchpad (2x2 Grid) + Today's Quest
-          ================================================================ -->
           <div class="lg:col-span-4 space-y-5">
             <h2 class="font-display font-extrabold text-xl sm:text-2xl text-ink">Quick Launchpad</h2>
 
-            <!-- 2x2 Colorful Launchpad Tiles -->
             <div class="grid grid-cols-2 gap-3.5">
-              <!-- Tile 1: Virtual Classroom -->
               <button onclick="setStudentTab('resources')"
                 class="bg-terracotta-500 hover:bg-terracotta-600 text-white rounded-3xl p-4 shadow-sm border border-white/40 flex flex-col items-center justify-center text-center gap-2 transition aspect-[4/3]">
                 <div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">💻</div>
-                <span class="font-display font-extrabold text-xs sm:text-sm leading-tight">Virtual<br>Classroom</span>
+                <span class="font-display font-extrabold text-xs sm:text-sm leading-tight">Google Drive<br>&amp; Classroom</span>
               </button>
 
-              <!-- Tile 2: My Digital Notebook / Reading Log -->
               <button onclick="setStudentTab('reading')"
                 class="bg-tealhub-500 hover:bg-tealhub-600 text-white rounded-3xl p-4 shadow-sm border border-white/40 flex flex-col items-center justify-center text-center gap-2 transition aspect-[4/3]">
                 <div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📓</div>
                 <span class="font-display font-extrabold text-xs sm:text-sm leading-tight">My Digital<br>Notebook</span>
               </button>
 
-              <!-- Tile 3: Art & DIY Design / Portfolio Showcase -->
               <button onclick="setStudentTab('portfolio')"
                 class="bg-sage-500 hover:bg-sage-600 text-white rounded-3xl p-4 shadow-sm border border-white/40 flex flex-col items-center justify-center text-center gap-2 transition aspect-[4/3]">
                 <div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">🎨</div>
                 <span class="font-display font-extrabold text-xs sm:text-sm leading-tight">Art &amp; Project<br>Showcase</span>
               </button>
 
-              <!-- Tile 4: Mosaic / Weekly Schedule & Calendar -->
               <button onclick="setStudentTab('schedule')"
                 class="relative overflow-hidden rounded-3xl p-4 shadow-sm border border-white/60 flex flex-col items-center justify-center text-center transition aspect-[4/3]"
                 style="background: repeating-conic-gradient(#E67635 0% 25%, #338A94 0% 50%, #F7B552 0% 75%, #5D8A5E 0% 100%) 50% / 36px 36px;">
                 <span class="px-3 py-1.5 rounded-xl bg-slate-900/80 text-white font-display font-extrabold text-xs shadow">
-                  Weekly Schedule
+                  Google Calendar
                 </span>
               </button>
             </div>
 
-            <!-- Today's Quest Progress Card -->
             <div class="pt-1">
               <h2 class="font-display font-extrabold text-xl sm:text-2xl text-ink mb-3">Today’s Quest</h2>
               <div class="bg-white rounded-3xl p-5 shadow-sm border border-white space-y-3">
@@ -1959,7 +1979,7 @@
           <div class="bg-white rounded-3xl p-6 border border-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h3 class="text-lg font-display font-extrabold text-ink">Weekly Time-Blocked Schedule</h3>
-              <p class="text-xs text-slate-500">Sync individual blocks directly to Google Calendar or export the full schedule (.ics).</p>
+              <p class="text-xs text-slate-500">Sync individual blocks directly to your Google Calendar or export the full schedule (.ics).</p>
             </div>
             <button onclick="downloadScheduleICS()"
               class="px-4 py-2.5 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold shadow-sm shrink-0">
@@ -2149,7 +2169,7 @@
                       <span class="text-xs font-bold uppercase px-2.5 py-0.5 rounded-lg bg-slate-100 text-slate-700">${asg.subject}</span>
                       <span class="text-xs font-semibold px-2.5 py-0.5 rounded-lg bg-tealhub-500/10 text-tealhub-600">${asg.type}</span>
                       ${asg.strictMode ? `<span class="text-xs font-semibold px-2.5 py-0.5 rounded-lg bg-red-50 text-red-700">🔒 Strict Mode</span>` : ''}
-                      ${asg.allowProjectLink ? `<span class="text-xs font-semibold px-2.5 py-0.5 rounded-lg bg-sage-50 text-sage-700">📎 Project Link Enabled</span>` : ''}
+                      ${asg.allowProjectLink ? `<span class="text-xs font-semibold px-2.5 py-0.5 rounded-lg bg-sage-50 text-sage-700">📎 Google Drive Link Enabled</span>` : ''}
                     </div>
                     <h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4>
                     <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
@@ -2189,8 +2209,8 @@
       return `
         <div class="space-y-6">
           <div>
-            <h3 class="text-xl font-display font-extrabold text-ink">Resource Library &amp; Learning Tools</h3>
-            <p class="text-xs text-slate-600">Quick links to virtual courses, textbooks, calculators, and study guides.</p>
+            <h3 class="text-xl font-display font-extrabold text-ink">Google Workspace &amp; Resource Library</h3>
+            <p class="text-xs text-slate-600">Quick links to Google Drive, Google Docs, virtual courses, calculators, and study guides.</p>
           </div>
           <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             ${appState.resources.map(res => `
@@ -2211,7 +2231,7 @@
       `;
     }
 
-    // --- TAB 6: GRADES & PORTFOLIO SHOWCASE ("My Achievements") ---
+    // --- TAB 6: GRADES & PORTFOLIO SHOWCASE ---
     function renderTabPortfolio(student, metrics) {
       const myShowcase = appState.portfolioShowcase.filter(p => p.studentId === student.id);
 
@@ -2244,13 +2264,13 @@
           <div class="grid lg:grid-cols-3 gap-6">
             <form onsubmit="addPortfolioShowcaseItem(event)" class="bg-white rounded-3xl p-6 border border-white shadow-sm space-y-3 h-fit">
               <h4 class="font-display font-extrabold text-ink text-base">+ Add Best Work to Portfolio</h4>
-              <p class="text-xs text-slate-500">Save favorite projects, art pieces, essays, or photos for year-end evaluation.</p>
+              <p class="text-xs text-slate-500">Save favorite projects, Google Docs, art pieces, or photos for year-end evaluation.</p>
               <select id="port_subject" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs">
                 ${appState.settings.subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
               </select>
               <input type="text" id="port_title" required placeholder="Project or Work Title" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
               <textarea id="port_desc" rows="3" required placeholder="What did you create or learn?" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"></textarea>
-              <input type="url" id="port_link" placeholder="Google Drive / Photo / Project URL (optional)" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+              <input type="url" id="port_link" placeholder="Google Drive / Docs / Photo URL (optional)" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
               <button type="submit" class="w-full py-2.5 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold">
                 Pin to Showcase ★
               </button>
@@ -2271,7 +2291,7 @@
                   ${item.linkUrl ? `
                     <a href="${item.linkUrl}" target="_blank" rel="noopener noreferrer"
                       class="self-start px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-bold text-ink hover:bg-slate-50 shrink-0">
-                      Open Artifact ↗
+                      Open in Google Drive ↗
                     </a>
                   ` : ''}
                 </div>
@@ -2697,11 +2717,11 @@
 
             ${asg.allowProjectLink ? `
               <div class="bg-white rounded-3xl p-6 border border-white shadow-sm">
-                <label class="block text-xs font-bold uppercase text-tealhub-600 mb-1">📎 Project File / Shared Folder Link (Google Drive, Canva, Docs, Photo)</label>
-                <p class="text-xs text-slate-500 mb-3">Paste a shareable link to your completed project, slideshow, or uploaded photo.</p>
+                <label class="block text-xs font-bold uppercase text-tealhub-600 mb-1">📎 Attach Google Drive / Google Docs / Project Link</label>
+                <p class="text-xs text-slate-500 mb-3">Paste a shareable link from Google Drive, Google Docs, Google Slides, or Canva.</p>
                 <input type="url" id="asg_project_link_input" value="${(sub?.projectLink || '').replace(/"/g, '&quot;')}"
                   ${isSubmitted ? 'disabled' : ''}
-                  placeholder="https://drive.google.com/..."
+                  placeholder="https://docs.google.com/..."
                   class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm" />
               </div>
             ` : ''}
@@ -2737,7 +2757,7 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Manage announcements, schedule &amp; Google Calendar sync, lessons, quizzes, grades, and student PINs.</p>
+              <p class="text-sm text-slate-500">Manage announcements, schedule &amp; Google Calendar sync, lessons, quizzes, grades, and student Gmail access.</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="exportGradesCSV()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
@@ -2756,7 +2776,7 @@
               { id: "create-assignment", label: "+ New Homework / Quiz" },
               { id: "schedule-hub", label: "Schedule, Syllabus & Resources" },
               { id: "gradebook", label: "Gradebook & Logs", badge: pendingSubKeys.length },
-              { id: "students", label: "Students & PINs" }
+              { id: "students", label: "Students & Gmail Access" }
             ].map(t => `
               <button onclick="setParentTab('${t.id}')"
                 class="pb-3 px-3.5 text-sm font-display font-bold border-b-2 whitespace-nowrap transition flex items-center gap-2 ${
@@ -2915,8 +2935,8 @@
                     class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
                 </div>
                 <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Study Guide / External Link (Optional)</label>
-                  <input type="url" id="les_link" placeholder="https://..."
+                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Study Guide / Google Doc Link (Optional)</label>
+                  <input type="url" id="les_link" placeholder="https://docs.google.com/..."
                     class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
                 </div>
               </div>
@@ -3024,10 +3044,10 @@
                   <input type="checkbox" id="asg_allow_link" checked class="mt-1 w-4 h-4 accent-sage-600" />
                   <div>
                     <label for="asg_allow_link" class="font-bold text-xs text-sage-700 cursor-pointer">
-                      📎 Allow Project / Shared Folder Link
+                      📎 Allow Google Drive / Docs Link
                     </label>
                     <p class="text-[11px] text-slate-600 mt-0.5">
-                      Lets the student paste a Google Drive, Canva, or photo URL when turning in work.
+                      Lets the student paste a Google Drive, Docs, Slides, or photo URL when turning in work.
                     </p>
                   </div>
                 </div>
@@ -3167,10 +3187,10 @@
               </div>
 
               <div class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4">
-                <h3 class="font-bold text-ink">🔗 Manage Student Resource Library (Khan Academy, FLVS, Textbooks)</h3>
+                <h3 class="font-bold text-ink">🔗 Manage Student Resource Library (Google Drive, Khan Academy, FLVS)</h3>
                 <form onsubmit="addLibraryResource(event)" class="grid sm:grid-cols-4 gap-3">
-                  <input type="text" id="res_title" required placeholder="Resource Name (e.g. FLVS Login)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
-                  <input type="text" id="res_category" placeholder="Category (e.g. Virtual Courses)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                  <input type="text" id="res_title" required placeholder="Resource Name (e.g. Google Drive)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                  <input type="text" id="res_category" placeholder="Category (e.g. Google Workspace)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
                   <input type="url" id="res_url" required placeholder="https://..." class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
                   <button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">+ Add Resource</button>
                   <input type="text" id="res_notes" placeholder="Helpful login note or study tip (optional)" class="sm:col-span-4 px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
@@ -3301,38 +3321,38 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 6: STUDENTS & PINS -->
+          <!-- PARENT TAB 6: STUDENTS & GMAIL ACCESS -->
           ${parentTab === "students" ? `
             <div class="grid md:grid-cols-2 gap-6">
               <div class="space-y-4">
                 <div class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4">
-                  <h3 class="text-lg font-display font-extrabold text-ink">Student Profiles &amp; Private PINs</h3>
-                  <p class="text-xs text-slate-500">Each student must enter their assigned PIN to view their dashboard, lessons, and grades.</p>
+                  <h3 class="text-lg font-display font-extrabold text-ink">Student Profiles &amp; Gmail Accounts</h3>
+                  <p class="text-xs text-slate-500">Link each student's Gmail address so signing in with Google loads their personal dashboard automatically.</p>
 
                   <div class="space-y-3">
                     ${students.map(stu => `
                       <div class="p-4 rounded-xl bg-white border border-slate-200 space-y-3">
-                        <div class="grid grid-cols-3 gap-2">
+                        <div class="grid grid-cols-2 gap-2">
                           <div>
-                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Name</label>
+                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">First Name</label>
                             <input type="text" id="edit_stu_name_${stu.id}" value="${stu.name}" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-semibold" />
                           </div>
                           <div>
                             <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Grade</label>
                             <input type="text" id="edit_stu_grade_${stu.id}" value="${stu.gradeLevel}" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs" />
                           </div>
-                          <div>
-                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Student PIN</label>
-                            <input type="text" id="edit_stu_pin_${stu.id}" value="${stu.pin}" maxlength="8" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono font-bold" />
+                          <div class="col-span-2">
+                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Student Gmail Address</label>
+                            <input type="email" id="edit_stu_email_${stu.id}" value="${stu.email || ''}" placeholder="student@gmail.com" class="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs" />
                           </div>
                         </div>
                         <div class="flex justify-between items-center pt-1">
                           ${students.length > 1
                             ? `<button type="button" onclick="removeStudent('${stu.id}')" class="text-xs text-red-500 hover:underline">Remove</button>`
                             : `<span></span>`}
-                          <button type="button" onclick="updateStudentPinAndInfo('${stu.id}')"
+                          <button type="button" onclick="updateStudentInfo('${stu.id}')"
                             class="px-3.5 py-1.5 rounded-lg bg-ink text-white text-xs font-bold hover:opacity-90">
-                            Save Student &amp; PIN
+                            Save Student Profile
                           </button>
                         </div>
                       </div>
@@ -3342,13 +3362,13 @@
 
                 <form onsubmit="addNewStudent(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3">
                   <h4 class="font-bold text-ink text-sm">+ Add Another Student</h4>
-                  <div class="grid grid-cols-3 gap-2">
+                  <div class="grid grid-cols-2 gap-2">
                     <input type="text" id="new_stu_name" required placeholder="First Name" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
                     <input type="text" id="new_stu_grade" placeholder="Grade (e.g. 6th Grade)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
-                    <input type="text" id="new_stu_pin" required maxlength="8" placeholder="PIN (4-8 digits)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white font-mono" />
+                    <input type="email" id="new_stu_email" placeholder="student@gmail.com" class="col-span-2 px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
                   </div>
                   <button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold hover:bg-sage-600">
-                    Create Student Login
+                    Add Student Profile
                   </button>
                 </form>
               </div>
@@ -3356,7 +3376,7 @@
               <form onsubmit="saveGeneralSettings(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4 h-fit">
                 <h3 class="text-lg font-display font-extrabold text-ink">Parent PIN &amp; School Settings</h3>
                 <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent / Teacher Master PIN (4–8 digits)</label>
+                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent / Teacher PIN (Used for Strict Test Unlock)</label>
                   <input type="text" id="set_parent_pin" value="${appState.settings.parentPin}" maxlength="8" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-mono font-bold" />
                 </div>
                 <div class="grid grid-cols-2 gap-3">
@@ -3404,7 +3424,7 @@
 
             ${sub.projectLink ? `
               <div class="mt-4 p-3.5 rounded-2xl bg-sage-50 border border-sage-100 flex items-center justify-between">
-                <span class="text-xs font-bold text-sage-700">📎 Attached Project Link:</span>
+                <span class="text-xs font-bold text-sage-700">📎 Attached Google Drive / Project Link:</span>
                 <a href="${sub.projectLink}" target="_blank" rel="noopener noreferrer" class="text-xs font-bold underline text-ink">Open Student Project ↗</a>
               </div>
             ` : ''}
