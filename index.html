@@ -58,6 +58,9 @@
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.19.1/dist/contrib/auto-render.min.js"></script>
 
+  <!-- JSZip for 1-Click Organized Annual Review Folder Export -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
   <style>
     body {
       background-color: #DCE8EE;
@@ -333,12 +336,17 @@
     let activeCourseSubject = appState.settings.subjects[0] || "Pre-Algebra";
     let assignmentFilterTab = "todo";
 
-    // Parent Hub Tabs & Subject Workspace States
+    // Parent Hub Tabs & Workspace States
     let parentTab = "overview";
     let parentSubjectTab = appState.settings.subjects[0] || "Pre-Algebra";
     let parentSubjectEditorMode = null; // null | "lesson" | "assignment"
     let parentSyllabusSubject = appState.settings.subjects[0] || "Pre-Algebra";
     let parentStudentFilter = "All";
+
+    // Parent "Student Records" Profile Inspector State
+    let inspectedStudentId = appState.settings.students[0]?.id || "stu_1";
+    let studentProfileSubTab = "overview"; // "overview" | "submissions" | "lessons" | "logs"
+
     let editingLessonId = null;
     let editingAssignmentId = null;
     let editingScheduleId = null;
@@ -573,7 +581,7 @@
       }
     }
 
-    // Helper Getters (Including Teacher Sandbox as a visible student in Parent Hub)
+    // Helper Getters
     function getAllStudentsIncludingSandbox() {
       const realStudents = appState.settings.students || [];
       return [
@@ -739,7 +747,7 @@
     };
 
     // =========================================================================
-    // 6. KATEX MATH & MARKDOWN-LITE HELPER (AUTO-WRAPS BARE EQUATIONS IN OPTIONS)
+    // 6. KATEX MATH & MARKDOWN-LITE HELPER
     // =========================================================================
     function formatRichText(raw) {
       if (!raw) return "";
@@ -764,10 +772,8 @@
         .replace(/>/g, "&gt;")
         .trim();
 
-      // If already contains $ delimiters, return as-is for KaTeX auto-render
       if (str.includes("$")) return str;
 
-      // Auto-wrap bare algebraic expressions/equations (e.g., "y = x^2 - 4", "y = 6/x", "x^4", "0.5 g/cm^3")
       const looksLikePureMath =
         /^[a-zA-Z0-9\s\+\-\*\/\^\=\(\)\.\,\{\}\[\]\<\>\|\_]+$/.test(str) &&
         (/[\^]/.test(str) || /^[a-zA-Z]\s*=/.test(str) || /\b\d+\/[a-zA-Z]\b/.test(str));
@@ -889,13 +895,38 @@
     }
 
     // =========================================================================
-    // 8. ROLE SWITCHING, NAVIGATION & SANDBOX PREVIEW CONTROLS
+    // 8. ROLE SWITCHING, NAVIGATION, FILTERS & REVIEW CONTROLS (ALL WINDOW-BOUND)
     // =========================================================================
     window.closeStudentDetailView = function() {
       exitStrictSessionCleanup();
       activeLessonId = null;
       activeAssignmentId = null;
       printableRecord = null;
+      render();
+    };
+
+    window.setParentStudentFilter = function(stuId) {
+      parentStudentFilter = stuId;
+      render();
+    };
+
+    window.openSubmissionReview = function(subKey) {
+      activeReviewKey = subKey;
+      render();
+    };
+
+    window.closeSubmissionReview = function() {
+      activeReviewKey = null;
+      render();
+    };
+
+    window.selectInspectedStudent = function(stuId) {
+      inspectedStudentId = stuId;
+      render();
+    };
+
+    window.setStudentProfileSubTab = function(subTab) {
+      studentProfileSubTab = subTab;
       render();
     };
 
@@ -1262,7 +1293,7 @@
     };
 
     // =========================================================================
-    // 10. PARENT BUILDER, EDITORS, REOPEN SUBMISSION, CSV IMPORT & GRADING
+    // 10. PARENT BUILDER, EDITORS, REOPEN, CSV IMPORT & ANNUAL REVIEW ZIP EXPORT
     // =========================================================================
     let builderQuestions = [
       { id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }
@@ -1785,6 +1816,250 @@
         saveState(`Imported ${lessonsAdded} lessons, ${newAssignments.length} assignments (${questionsAdded} Qs), & ${schedulesAdded} schedule blocks!`);
       };
       reader.readAsText(file);
+    };
+
+    // --- ANNUAL REVIEW ORGANIZED ZIP FOLDER GENERATOR ---
+    function buildClassPortfolioHTML(stu, subj, metrics) {
+      const syl = appState.settings.subjectDetails?.[subj] || {};
+      const stat = metrics.subjectStats[subj] || { earned: 0, total: 0, count: 0 };
+      const pct = stat.total > 0 ? Math.round((stat.earned / stat.total) * 100) + "%" : "In Progress";
+      const lessons = metrics.myLessons.filter(l => l.subject === subj);
+      const asgs = metrics.myAssignments.filter(a => a.subject === subj);
+      const showcase = (appState.portfolioShowcase || []).filter(p => p.studentId === stu.id && p.subject === subj);
+
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><title>${stu.name} — ${subj} Portfolio (${appState.settings.schoolYear})</title>
+<style>
+  body { font-family: Georgia, serif; color: #1e293b; max-width: 820px; margin: 32px auto; padding: 0 24px; line-height: 1.55; }
+  header { border-bottom: 3px solid #28727B; padding-bottom: 14px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
+  h1 { font-family: system-ui, sans-serif; color: #263238; margin: 4px 0 0; font-size: 24px; }
+  h2 { font-family: system-ui, sans-serif; color: #28727B; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-top: 28px; font-size: 16px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .badge { font-family: system-ui, sans-serif; font-size: 11px; font-weight: bold; color: #E67635; text-transform: uppercase; letter-spacing: 0.1em; }
+  .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 18px; margin-bottom: 14px; }
+  .q-block { border-left: 3px solid #5D8A5E; padding-left: 12px; margin: 10px 0; font-size: 14px; }
+  @media print { body { margin: 0; } }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="badge">Sunshine Homeschool • Subject Portfolio Record</div>
+      <h1>${subj}</h1>
+    </div>
+    <div style="text-align:right; font-family:system-ui,sans-serif; font-size:12px;">
+      <div><strong>Student:</strong> ${stu.name} (${stu.gradeLevel})</div>
+      <div><strong>Academic Year:</strong> ${appState.settings.schoolYear}</div>
+      <div><strong>Course Average:</strong> ${pct} (${stat.earned}/${stat.total} pts)</div>
+    </div>
+  </header>
+
+  <h2>1. Course Overview &amp; Syllabus</h2>
+  <div class="box">
+    <p><strong>Current Focus:</strong> ${syl.currentUnit || "Standard Grade-Level Curriculum"}</p>
+    <p>${syl.syllabus || "Comprehensive grade-level study."}</p>
+  </div>
+
+  <h2>2. Completed &amp; Assigned Class Lessons (${lessons.length})</h2>
+  ${lessons.map(l => {
+    const done = l.completedBy?.[stu.id];
+    return `<div class="box">
+      <strong>${l.title}</strong> <span style="font-size:12px;color:#64748b;">(${l.date || ''} • ${done ? 'Completed ' + new Date(done).toLocaleDateString() : 'Assigned'})</span>
+      <div style="font-size:13.5px;margin-top:8px;white-space:pre-line;">${(l.content || '').replace(/</g,'&lt;')}</div>
+    </div>`;
+  }).join("") || "<p>No lessons recorded.</p>"}
+
+  <h2>3. Graded Homework, Quizzes &amp; Assessments (${asgs.length})</h2>
+  ${asgs.map(a => {
+    const sub = (appState.submissions || {})[getSubKey(stu.id, a.id)];
+    const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+    return `<div class="box">
+      <div style="display:flex;justify-content:space-between;">
+        <strong>${a.title} (${a.type})</strong>
+        <span><strong>${sub ? `${sub.earnedPoints}/${totalPts} pts` : 'Not Submitted'}</strong></span>
+      </div>
+      ${sub?.parentFeedback ? `<p style="font-size:13px;color:#3B5E3C;"><em>Teacher Feedback: ${sub.parentFeedback}</em></p>` : ''}
+      ${sub ? a.questions.map((q, idx) => {
+        const ans = sub.answers?.[q.id] ?? "";
+        const disp = q.type === "mcq" && ans !== "" ? (q.options[Number(ans)] || ans) : ans;
+        return `<div class="q-block">
+          <div><strong>Q${idx+1}:</strong> ${q.prompt} <em>(${sub.questionScores?.[q.id] ?? 0}/${q.points} pts)</em></div>
+          <div><strong>Student Response:</strong> ${disp || '—'}</div>
+        </div>`;
+      }).join("") : ''}
+    </div>`;
+  }).join("") || "<p>No assessments recorded.</p>"}
+
+  ${showcase.length ? `<h2>4. Student Portfolio Showcase Projects</h2>` + showcase.map(s => `<div class="box"><strong>${s.title}</strong> (${s.date})<p>${s.description}</p></div>`).join("") : ''}
+
+  <footer style="margin-top:36px;padding-top:12px;border-top:1px solid #cbd5e1;font-family:system-ui,sans-serif;font-size:11px;color:#64748b;display:flex;justify-content:space-between;">
+    <span>Sunshine Homeschool — Official Subject Evaluation Packet</span>
+    <span>Generated ${new Date().toLocaleDateString()}</span>
+  </footer>
+</body></html>`;
+    }
+
+    function buildMasterAnnualReviewHTML(stu, metrics) {
+      const books = (appState.readingLogs || []).filter(r => r.studentId === stu.id);
+      const acts = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
+      const showcase = (appState.portfolioShowcase || []).filter(p => p.studentId === stu.id);
+
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><title>${stu.name} — Annual Homeschool Evaluation Portfolio (${appState.settings.schoolYear})</title>
+<style>
+  body { font-family: Georgia, serif; color: #1e293b; max-width: 850px; margin: 32px auto; padding: 0 24px; line-height: 1.55; }
+  header { border-bottom: 3px solid #E67635; padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
+  h1 { font-family: system-ui, sans-serif; color: #263238; margin: 4px 0 0; font-size: 26px; }
+  h2 { font-family: system-ui, sans-serif; color: #28727B; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-top: 30px; font-size: 16px; text-transform: uppercase; letter-spacing: 0.05em; }
+  table { width: 100%; border-collapse: collapse; font-family: system-ui, sans-serif; font-size: 13px; margin-top: 10px; }
+  th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
+  th { background: #f1f5f9; }
+  .summary-grid { display: flex; gap: 16px; margin: 16px 0; font-family: system-ui, sans-serif; }
+  .stat-card { flex: 1; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 14px; }
+  @media print { body { margin: 0; } }
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <div style="font-family:system-ui,sans-serif;font-size:11px;font-weight:bold;color:#E67635;text-transform:uppercase;letter-spacing:0.1em;">Sunshine Homeschool • Annual Evaluation Portfolio</div>
+      <h1>${stu.name} — Academic Progress Record</h1>
+    </div>
+    <div style="text-align:right;font-family:system-ui,sans-serif;font-size:12px;">
+      <div><strong>Grade Level:</strong> ${stu.gradeLevel}</div>
+      <div><strong>Academic Year:</strong> ${appState.settings.schoolYear}</div>
+      <div><strong>Date Generated:</strong> ${new Date().toLocaleDateString()}</div>
+    </div>
+  </header>
+
+  <div class="summary-grid">
+    <div class="stat-card"><div style="font-size:11px;color:#64748b;font-weight:bold;">CUMULATIVE GPA</div><div style="font-size:24px;font-weight:800;">${metrics.cumulativeGpa} / 4.0</div></div>
+    <div class="stat-card"><div style="font-size:11px;color:#64748b;font-weight:bold;">COMPLETED TASKS</div><div style="font-size:24px;font-weight:800;">${metrics.doneTasks} / ${metrics.totalTasks}</div></div>
+    <div class="stat-card"><div style="font-size:11px;color:#64748b;font-weight:bold;">BOOKS READ</div><div style="font-size:24px;font-weight:800;">${books.length}</div></div>
+    <div class="stat-card"><div style="font-size:11px;color:#64748b;font-weight:bold;">SERVICE &amp; ACTIVITY HRS</div><div style="font-size:24px;font-weight:800;">${acts.reduce((s,a)=>s+Number(a.hours||0),0).toFixed(1)}</div></div>
+  </div>
+
+  <h2>1. Subject Grade Summary &amp; Course Descriptions</h2>
+  <table>
+    <thead><tr><th>Subject</th><th>Syllabus / Curriculum Overview</th><th>Graded Items</th><th>Points</th><th>Average</th></tr></thead>
+    <tbody>
+      ${Object.entries(metrics.subjectStats).map(([subj, st]) => {
+        const syl = appState.settings.subjectDetails?.[subj]?.syllabus || "";
+        const avg = st.total > 0 ? Math.round((st.earned / st.total) * 100) + "%" : "—";
+        return `<tr><td><strong>${subj}</strong></td><td>${syl}</td><td>${st.count}</td><td>${st.earned}/${st.total}</td><td><strong>${avg}</strong></td></tr>`;
+      }).join("")}
+    </tbody>
+  </table>
+
+  <h2>2. Completed Lessons Log (${metrics.completedLessons.length})</h2>
+  <table>
+    <thead><tr><th>Subject</th><th>Lesson Title</th><th>Date Completed</th></tr></thead>
+    <tbody>
+      ${metrics.completedLessons.map(l => `<tr><td>${l.subject}</td><td>${l.title}</td><td>${new Date(l.completedBy[stu.id]).toLocaleDateString()}</td></tr>`).join("") || '<tr><td colspan="3">No lessons marked complete yet.</td></tr>'}
+    </tbody>
+  </table>
+
+  <h2>3. Graded Assessments &amp; Homework Record (${metrics.completedAssignments.length})</h2>
+  <table>
+    <thead><tr><th>Subject</th><th>Title</th><th>Type</th><th>Score</th><th>Evaluator Notes</th></tr></thead>
+    <tbody>
+      ${metrics.completedAssignments.map(a => {
+        const sub = (appState.submissions || {})[getSubKey(stu.id, a.id)];
+        const pct = sub.totalPoints > 0 ? Math.round((sub.earnedPoints / sub.totalPoints) * 100) + "%" : "";
+        return `<tr><td>${a.subject}</td><td>${a.title}</td><td>${a.type}</td><td>${sub.earnedPoints}/${sub.totalPoints} (${pct})</td><td>${sub.parentFeedback || ''}</td></tr>`;
+      }).join("") || '<tr><td colspan="5">No graded assessments yet.</td></tr>'}
+    </tbody>
+  </table>
+
+  <h2>4. Literature &amp; Reading Log (${books.length} Books)</h2>
+  <table>
+    <thead><tr><th>Book Title</th><th>Author</th><th>Pages</th><th>Date Finished</th><th>Reflection</th></tr></thead>
+    <tbody>
+      ${books.map(b => `<tr><td><strong>${b.title}</strong></td><td>${b.author}</td><td>${b.pages}</td><td>${b.dateFinished}</td><td>${b.reflection}</td></tr>`).join("") || '<tr><td colspan="5">No books logged yet.</td></tr>'}
+    </tbody>
+  </table>
+
+  <h2>5. Extracurricular &amp; Community Service Hours</h2>
+  <table>
+    <thead><tr><th>Date</th><th>Category</th><th>Organization &amp; Activity</th><th>Hours</th><th>Verified</th></tr></thead>
+    <tbody>
+      ${acts.map(a => `<tr><td>${a.date}</td><td>${a.type}</td><td><strong>${a.organization}:</strong> ${a.description}</td><td>${Number(a.hours).toFixed(1)}</td><td>${a.verifiedByParent ? 'Yes' : 'Logged'}</td></tr>`).join("") || '<tr><td colspan="5">No activity hours logged yet.</td></tr>'}
+    </tbody>
+  </table>
+
+  ${showcase.length ? `<h2>6. Portfolio Showcase Highlights</h2><ul>${showcase.map(s => `<li><strong>[${s.subject}] ${s.title}:</strong> ${s.description}</li>`).join("")}</ul>` : ''}
+
+  <div style="margin-top:44px;padding-top:16px;border-top:2px solid #1e293b;font-family:system-ui,sans-serif;font-size:12px;display:flex;justify-content:space-between;">
+    <div>Educator Signature: _______________________________</div>
+    <div>Evaluator / Reviewer Signature: _______________________________</div>
+  </div>
+</body></html>`;
+    }
+
+    window.downloadOrganizedAnnualReviewZip = async function(stuId) {
+      if (!window.JSZip) {
+        alert("ZIP library is still loading—please try again in 2 seconds.");
+        return;
+      }
+      const stu = getStudentById(stuId);
+      const metrics = computeStudentMetrics(stu);
+      const zip = new JSZip();
+      const safeName = stu.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const rootFolder = zip.folder(`Sunshine_Homeschool_Annual_Review_${safeName}`);
+
+      // 1. Master Annual Review Portfolio (Printable HTML)
+      rootFolder.file("00_MASTER_ANNUAL_REVIEW_PORTFOLIO.html", buildMasterAnnualReviewHTML(stu, metrics));
+
+      // 2. Master Gradebook CSV
+      const gradeRows = [["Subject", "Title", "Type", "Due Date", "Status", "Earned Points", "Total Points", "Percentage", "Teacher Feedback"]];
+      metrics.myAssignments.forEach(asg => {
+        const sub = (appState.submissions || {})[getSubKey(stu.id, asg.id)];
+        const total = asg.questions.reduce((acc, q) => acc + Number(q.points || 0), 0);
+        const pct = (sub && sub.earnedPoints !== undefined && total > 0) ? Math.round((sub.earnedPoints / total) * 100) + "%" : "";
+        gradeRows.push([
+          `"${asg.subject}"`,
+          `"${asg.title.replace(/"/g, '""')}"`,
+          asg.type,
+          asg.dueDate || "",
+          sub ? sub.status : "Not Started",
+          sub && sub.earnedPoints !== undefined ? sub.earnedPoints : "",
+          total,
+          pct,
+          `"${(sub?.parentFeedback || "").replace(/"/g, '""')}"`
+        ]);
+      });
+      rootFolder.file("01_Master_Gradebook_Summary.csv", gradeRows.map(r => r.join(",")).join("\n"));
+
+      // 3. Reading Log CSV
+      const books = (appState.readingLogs || []).filter(r => r.studentId === stu.id);
+      const readRows = [["Title", "Author", "Pages", "Date Finished", "Rating", "Reflection"]];
+      books.forEach(b => readRows.push([`"${b.title}"`, `"${b.author}"`, b.pages, b.dateFinished, b.rating, `"${(b.reflection||"").replace(/"/g,'""')}"`]));
+      rootFolder.file("02_Reading_Log.csv", readRows.map(r => r.join(",")).join("\n"));
+
+      // 4. Extracurricular & Service Hours CSV
+      const acts = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
+      const actRows = [["Date", "Category", "Organization", "Description", "Hours", "Parent Verified"]];
+      acts.forEach(a => actRows.push([a.date, `"${a.type}"`, `"${a.organization}"`, `"${(a.description||"").replace(/"/g,'""')}"`, a.hours, a.verifiedByParent ? "Yes" : "No"]));
+      rootFolder.file("03_Extracurricular_and_Service_Hours.csv", actRows.map(r => r.join(",")).join("\n"));
+
+      // 5. Individual Subject Folders & Portfolios
+      const classesFolder = rootFolder.folder("Individual_Classes");
+      (appState.settings.subjects || []).forEach(subj => {
+        const safeSubj = subj.replace(/[^a-zA-Z0-9_-]/g, "_");
+        classesFolder.file(`${safeSubj}_Full_Portfolio.html`, buildClassPortfolioHTML(stu, subj, metrics));
+      });
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Sunshine_Homeschool_Annual_Review_${safeName}_${new Date().toISOString().slice(0,10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showSavedToast(`Exported organized Annual Review folder for ${stu.name}!`);
     };
 
     window.exportJSONBackup = function() {
@@ -3098,7 +3373,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // VIEW D: PARENT DASHBOARD & UNIFIED SUBJECTS / CURRICULUM WORKSPACE
+    // VIEW D: PARENT DASHBOARD, STUDENT RECORDS INSPECTOR & ANNUAL REVIEW EXPORT
     // -------------------------------------------------------------------------
     function renderParentDashboard() {
       const subs = appState.submissions || {};
@@ -3108,6 +3383,8 @@
       const subjects = appState.settings.subjects || [];
       if (!subjects.includes(parentSyllabusSubject)) parentSyllabusSubject = subjects[0] || "";
       if (!subjects.includes(parentSubjectTab)) parentSubjectTab = subjects[0] || "";
+      if (!allStudents.some(s => s.id === inspectedStudentId)) inspectedStudentId = allStudents[0]?.id || "stu_1";
+
       const activeSylObj = appState.settings.subjectDetails?.[parentSyllabusSubject] || { currentUnit: "", syllabus: "" };
       const subjectRoadmap = getChronologicalTimelineForSubject(parentSubjectTab, appState.lessons || [], appState.assignments || []);
 
@@ -3116,7 +3393,7 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Manage subjects, lessons &amp; quizzes, schedules, syllabi, gradebook, and Student Sandbox preview.</p>
+              <p class="text-sm text-slate-500">Manage subjects, student progress at a glance, gradebook, and organized Annual Review exports.</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 hover:bg-amberwarm-500 text-ink text-xs font-extrabold shadow-sm">
@@ -3129,9 +3406,6 @@
               <button onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
                 📄 CSV Template
               </button>
-              <button onclick="exportGradesCSV()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
-                ⬇ Export Grades (CSV)
-              </button>
               <button onclick="exportJSONBackup()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
                 ⬇ Full Backup (JSON)
               </button>
@@ -3141,10 +3415,11 @@
           <div class="flex gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
             ${[
               { id: "overview", label: "Overview & Announcements" },
+              { id: "student-records", label: "Student Records & Annual Review" },
               { id: "subjects-hub", label: "Subjects & Curriculum" },
               { id: "schedule-hub", label: "Schedule, Syllabus & Resources" },
               { id: "gradebook", label: "Gradebook & Logs", badge: pendingSubKeys.length },
-              { id: "students", label: "Students & Gmail Access" }
+              { id: "students", label: "Settings & Gmail Access" }
             ].map(t => `
               <button onclick="setParentTab('${t.id}')"
                 class="pb-3 px-3.5 text-sm font-display font-bold border-b-2 whitespace-nowrap transition flex items-center gap-2 ${
@@ -3172,8 +3447,9 @@
                         <div>
                           <span class="text-xs font-bold text-tealhub-600">${stu?.name || 'Student'} • ${asg.subject}</span>
                           <p class="font-bold text-ink">${asg.title}</p>
+                          ${sub.violations?.length ? `<p class="text-xs text-red-600 font-semibold mt-0.5">⚠ ${sub.violations.length} Focus Alert(s): ${sub.violations[0]}</p>` : ''}
                         </div>
-                        <button onclick="activeReviewKey='${subKey}'; render();"
+                        <button onclick="openSubmissionReview('${subKey}')"
                           class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold hover:opacity-90">
                           Review &amp; Grade →
                         </button>
@@ -3220,7 +3496,257 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 2: UNIFIED SUBJECTS & CURRICULUM WORKSPACE -->
+          <!-- PARENT TAB 2: STUDENT RECORDS AT A GLANCE & ANNUAL REVIEW EXPORT -->
+          ${parentTab === "student-records" ? (() => {
+            const stu = getStudentById(inspectedStudentId);
+            const metrics = computeStudentMetrics(stu);
+            const stuBooks = (appState.readingLogs || []).filter(r => r.studentId === stu.id);
+            const stuActs = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
+            const totalActHours = stuActs.reduce((s, a) => s + Number(a.hours || 0), 0);
+
+            return `
+              <div class="space-y-6">
+                <!-- STUDENT PICKER BAR -->
+                <div class="bg-slate-50/80 p-5 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold uppercase text-slate-500 mr-1">Select Student:</span>
+                    ${allStudents.map(s => `
+                      <button onclick="selectInspectedStudent('${s.id}')"
+                        class="px-4 py-2 rounded-xl text-xs font-extrabold transition ${
+                          inspectedStudentId === s.id
+                            ? 'bg-tealhub-500 text-white shadow-sm'
+                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                        }">
+                        ${s.name} (${s.gradeLevel})
+                      </button>
+                    `).join("")}
+                  </div>
+
+                  <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')"
+                    class="px-4 py-2.5 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-extrabold shadow-sm flex items-center gap-2 shrink-0">
+                    📦 Download Annual Review Folder (.zip)
+                  </button>
+                </div>
+
+                <!-- STUDENT SUB-TABS -->
+                <div class="flex flex-wrap gap-2">
+                  ${[
+                    { id: "overview", label: "📊 At-a-Glance & Grades" },
+                    { id: "submissions", label: `📝 Submitted Work (${metrics.completedAssignments.length + metrics.inProgressAssignments.length})` },
+                    { id: "lessons", label: `📖 Lessons (${metrics.completedLessons.length}/${metrics.myLessons.length})` },
+                    { id: "logs", label: `📚 Reading & Hours (${stuBooks.length} books, ${totalActHours.toFixed(1)} hrs)` },
+                    { id: "annual-export", label: "🗂️ Annual Review & Class Exports" }
+                  ].map(st => `
+                    <button onclick="setStudentProfileSubTab('${st.id}')"
+                      class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                        studentProfileSubTab === st.id
+                          ? 'bg-ink text-white shadow-sm'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }">
+                      ${st.label}
+                    </button>
+                  `).join("")}
+                </div>
+
+                <!-- SUB-TAB A: AT-A-GLANCE & GRADES -->
+                ${studentProfileSubTab === "overview" ? `
+                  <div class="space-y-6">
+                    <div class="grid sm:grid-cols-4 gap-4">
+                      <div class="p-5 rounded-2xl bg-tealhub-500 text-white">
+                        <p class="text-[11px] font-bold uppercase text-white/80">Cumulative GPA</p>
+                        <p class="text-3xl font-display font-extrabold mt-1">${metrics.cumulativeGpa}</p>
+                        <p class="text-xs text-white/90 mt-1">${metrics.totalPointsEarned} pts earned</p>
+                      </div>
+                      <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                        <p class="text-[11px] font-bold uppercase text-slate-500">Overall Completion</p>
+                        <p class="text-3xl font-display font-extrabold text-ink mt-1">${metrics.overallProgressPct}%</p>
+                        <p class="text-xs text-slate-500 mt-1">${metrics.doneTasks} of ${metrics.totalTasks} tasks</p>
+                      </div>
+                      <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                        <p class="text-[11px] font-bold uppercase text-slate-500">Books Read</p>
+                        <p class="text-3xl font-display font-extrabold text-ink mt-1">${stuBooks.length}</p>
+                        <p class="text-xs text-slate-500 mt-1">Goal: ${appState.settings.readingGoalBooks || 20} books</p>
+                      </div>
+                      <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200">
+                        <p class="text-[11px] font-bold uppercase text-slate-500">Activity &amp; Service</p>
+                        <p class="text-3xl font-display font-extrabold text-ink mt-1">${totalActHours.toFixed(1)} hrs</p>
+                        <p class="text-xs text-slate-500 mt-1">${stuActs.length} logged entries</p>
+                      </div>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      ${subjects.map(subj => {
+                        const st = metrics.subjectStats[subj] || { earned: 0, total: 0, count: 0 };
+                        const avg = st.total > 0 ? Math.round((st.earned / st.total) * 100) : null;
+                        const subjLesDone = metrics.completedLessons.filter(l => l.subject === subj).length;
+                        const subjLesTotal = metrics.myLessons.filter(l => l.subject === subj).length;
+                        return `
+                          <div class="p-5 rounded-2xl border border-slate-200 bg-white space-y-2">
+                            <div class="flex justify-between items-center">
+                              <h4 class="font-display font-extrabold text-base text-ink">${subj}</h4>
+                              <span class="text-lg font-display font-extrabold text-tealhub-600">${avg !== null ? avg + '%' : '—'}</span>
+                            </div>
+                            <p class="text-xs text-slate-500">Graded Assessments: <strong>${st.count}</strong> (${st.earned}/${st.total} pts) • Lessons Completed: <strong>${subjLesDone}/${subjLesTotal}</strong></p>
+                            <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div class="bg-sage-500 h-full rounded-full" style="width: ${avg || 0}%"></div>
+                            </div>
+                          </div>
+                        `;
+                      }).join("")}
+                    </div>
+                  </div>
+                ` : ''}
+
+                <!-- SUB-TAB B: SUBMITTED & GRADED WORK -->
+                ${studentProfileSubTab === "submissions" ? `
+                  <div class="space-y-3">
+                    ${metrics.myAssignments.map(a => {
+                      const subKey = getSubKey(stu.id, a.id);
+                      const sub = subs[subKey];
+                      const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+                      const violCount = sub?.violations?.length || 0;
+                      return `
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                              <span class="text-xs font-bold uppercase text-tealhub-600">${a.subject}</span>
+                              <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${
+                                !sub ? 'bg-slate-100 text-slate-500' :
+                                sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' :
+                                sub.status === 'needs_review' ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-blue-50 text-blue-700'
+                              }">${!sub ? 'Not Started' : sub.status.replace('_', ' ')}</span>
+                              ${violCount > 0 ? `<span class="text-xs font-bold text-red-600">⚠ ${violCount} Focus Alert: ${sub.violations[0]}</span>` : ''}
+                            </div>
+                            <p class="font-bold text-sm text-ink">${a.title}</p>
+                            <p class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'} ${sub ? `• Score: ${sub.earnedPoints}/${totalPts} pts` : ''}</p>
+                          </div>
+                          <div class="flex items-center gap-2 shrink-0">
+                            ${sub ? `<button onclick="reopenAssignmentSubmission('${subKey}')" class="px-2.5 py-1.5 rounded-lg border border-amberwarm-400 bg-amberwarm-50 text-amberwarm-600 text-xs font-bold">↺ Reopen</button>` : ''}
+                            ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
+                              <button onclick="openSubmissionReview('${subKey}')" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50">Review</button>
+                              <button onclick="openPrintablePortfolio('submission', '${a.id}', '${stu.id}')" class="px-3 py-1.5 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
+                            ` : ''}
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : ''}
+
+                <!-- SUB-TAB C: LESSONS -->
+                ${studentProfileSubTab === "lessons" ? `
+                  <div class="space-y-2.5">
+                    ${metrics.myLessons.map(l => {
+                      const doneAt = l.completedBy?.[stu.id];
+                      return `
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-3">
+                          <div>
+                            <span class="text-xs font-bold text-tealhub-600">${l.subject} • ${l.date || ''}</span>
+                            <p class="font-bold text-sm text-ink">${l.title}</p>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <span class="px-2.5 py-1 rounded-full text-xs font-bold ${doneAt ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
+                              ${doneAt ? `✓ Completed ${new Date(doneAt).toLocaleDateString()}` : 'Not Completed'}
+                            </span>
+                            ${doneAt ? `<button onclick="resetLessonCompletion('${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-bold">↺ Reopen</button>` : ''}
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : ''}
+
+                <!-- SUB-TAB D: READING & ACTIVITY LOGS -->
+                ${studentProfileSubTab === "logs" ? `
+                  <div class="grid md:grid-cols-2 gap-6">
+                    <div class="space-y-3">
+                      <h4 class="font-bold text-ink text-sm">📚 Books Read (${stuBooks.length})</h4>
+                      ${stuBooks.length === 0 ? `<p class="text-xs text-slate-400 italic">No books logged yet.</p>` : ''}
+                      ${stuBooks.map(b => `
+                        <div class="p-3.5 rounded-xl border border-slate-200 bg-white text-xs">
+                          <p class="font-bold text-sm text-ink">${b.title} <span class="font-normal text-slate-500">by ${b.author}</span></p>
+                          <p class="text-slate-600 mt-1">"${b.reflection}"</p>
+                        </div>
+                      `).join("")}
+                    </div>
+                    <div class="space-y-3">
+                      <h4 class="font-bold text-ink text-sm">🏅 Extracurricular &amp; Service Hours (${totalActHours.toFixed(1)} hrs)</h4>
+                      ${stuActs.length === 0 ? `<p class="text-xs text-slate-400 italic">No activity hours logged yet.</p>` : ''}
+                      ${stuActs.map(a => `
+                        <div class="p-3.5 rounded-xl border border-slate-200 bg-white text-xs flex justify-between items-center">
+                          <div>
+                            <p class="font-bold text-ink">${a.organization} (${a.hours} hrs)</p>
+                            <p class="text-slate-600">${a.description}</p>
+                          </div>
+                          <button onclick="toggleVerifyActivity('${a.id}')" class="px-2.5 py-1 rounded-lg font-bold ${a.verifiedByParent ? 'bg-emerald-100 text-emerald-800' : 'bg-ink text-white'}">
+                            ${a.verifiedByParent ? '✓ Verified' : 'Verify'}
+                          </button>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                ` : ''}
+
+                <!-- SUB-TAB E: ANNUAL REVIEW & INDIVIDUAL CLASS EXPORTS -->
+                ${studentProfileSubTab === "annual-export" ? `
+                  <div class="space-y-6">
+                    <div class="p-6 rounded-2xl bg-sage-50 border border-sage-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h4 class="font-display font-extrabold text-lg text-ink">📦 Complete Annual Review Folder (.zip) for ${stu.name}</h4>
+                        <p class="text-xs text-slate-600 mt-1 max-w-xl">
+                          Downloads one organized ZIP folder containing: <strong>00_MASTER_ANNUAL_REVIEW_PORTFOLIO.html</strong> (printable master evaluation summary with signature lines), <strong>01_Master_Gradebook_Summary.csv</strong>, <strong>02_Reading_Log.csv</strong>, <strong>03_Extracurricular_Hours.csv</strong>, plus a subfolder of <strong>individual class portfolio files</strong>.
+                        </p>
+                      </div>
+                      <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')"
+                        class="px-5 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-extrabold shadow-sm shrink-0">
+                        ⬇ Download Organized Folder (.zip)
+                      </button>
+                    </div>
+
+                    <div>
+                      <h4 class="font-bold text-ink text-sm mb-3">Individual Class &amp; Log Printables (Save as PDF)</h4>
+                      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        ${subjects.map(subj => `
+                          <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-2">
+                            <div>
+                              <span class="text-[10px] font-bold uppercase text-tealhub-600">Subject File</span>
+                              <p class="font-bold text-sm text-ink">${subj}</p>
+                            </div>
+                            <button onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();"
+                              class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
+                              🖨 Open / PDF
+                            </button>
+                          </div>
+                        `).join("")}
+
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-2">
+                          <div>
+                            <span class="text-[10px] font-bold uppercase text-terracotta-500">Annual Log</span>
+                            <p class="font-bold text-sm text-ink">Reading Log</p>
+                          </div>
+                          <button onclick="openPrintablePortfolio('reading', 'all', '${stu.id}')" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
+                            🖨 Open / PDF
+                          </button>
+                        </div>
+
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-2">
+                          <div>
+                            <span class="text-[10px] font-bold uppercase text-terracotta-500">Annual Log</span>
+                            <p class="font-bold text-sm text-ink">Activity &amp; Service Hours</p>
+                          </div>
+                          <button onclick="openPrintablePortfolio('activities', 'all', '${stu.id}')" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
+                            🖨 Open / PDF
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          })() : ''}
+
+          <!-- PARENT TAB 3: UNIFIED SUBJECTS & CURRICULUM WORKSPACE -->
           ${parentTab === "subjects-hub" ? `
             <div class="grid lg:grid-cols-4 gap-6">
               <div class="space-y-2">
@@ -3553,7 +4079,7 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 3: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS TABS & RESOURCES -->
+          <!-- PARENT TAB 4: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS TABS & RESOURCES -->
           ${parentTab === "schedule-hub" ? `
             <div class="space-y-8">
               <div class="grid lg:grid-cols-2 gap-6">
@@ -3672,23 +4198,28 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 4: GRADEBOOK, LESSON COMPLETION & VOLUNTEER HOURS -->
+          <!-- PARENT TAB 5: GRADEBOOK, LESSON COMPLETION & VOLUNTEER HOURS -->
           ${parentTab === "gradebook" ? `
             <div class="space-y-8">
               <div>
-                <div class="mb-4 flex flex-wrap items-center gap-2">
-                  <span class="text-xs font-bold uppercase text-slate-500">Filter by Student:</span>
-                  ${["All", ...allStudents.map(s => s.id)].map(id => {
-                    const label = id === "All" ? "All Students" : getStudentById(id)?.name;
-                    return `
-                      <button onclick="parentStudentFilter='${id}'; render();"
-                        class="px-3 py-1 rounded-full text-xs font-bold ${
-                          parentStudentFilter === id ? 'bg-tealhub-500 text-white' : 'bg-slate-100 text-slate-600'
-                        }">
-                        ${label}
-                      </button>
-                    `;
-                  }).join("")}
+                <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold uppercase text-slate-500">Filter by Student:</span>
+                    ${["All", ...allStudents.map(s => s.id)].map(id => {
+                      const label = id === "All" ? "All Students" : getStudentById(id)?.name;
+                      return `
+                        <button onclick="setParentStudentFilter('${id}')"
+                          class="px-3 py-1 rounded-full text-xs font-bold transition ${
+                            parentStudentFilter === id ? 'bg-tealhub-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }">
+                          ${label}
+                        </button>
+                      `;
+                    }).join("")}
+                  </div>
+                  <button onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700">
+                    ⬇ Export Grades (CSV)
+                  </button>
                 </div>
 
                 <!-- LESSON COMPLETION TRACKER (UNGRADED) -->
@@ -3752,7 +4283,7 @@
                           <th class="py-3.5 px-4">Assessment / Assignment</th>
                           <th class="py-3.5 px-4">Status</th>
                           <th class="py-3.5 px-4">Score</th>
-                          <th class="py-3.5 px-4">Focus Log</th>
+                          <th class="py-3.5 px-4">Focus / Alert Reason</th>
                           <th class="py-3.5 px-4 text-right">Portfolio / Review / Reopen</th>
                         </tr>
                       </thead>
@@ -3768,7 +4299,7 @@
                               const pct = sub && sub.earnedPoints !== undefined && totalPts > 0
                                 ? Math.round((sub.earnedPoints / totalPts) * 100) + "%"
                                 : "—";
-                              const violCount = sub?.violations?.length || 0;
+                              const violations = sub?.violations || [];
                               const isSandbox = stu.id === SANDBOX_STUDENT_ID;
 
                               return `
@@ -3788,9 +4319,11 @@
                                   <td class="py-3.5 px-4 font-bold text-ink">
                                     ${sub && sub.earnedPoints !== undefined ? `${sub.earnedPoints}/${totalPts} (${pct})` : '—'}
                                   </td>
-                                  <td class="py-3.5 px-4 text-xs">
+                                  <td class="py-3.5 px-4 text-xs max-w-xs">
                                     ${a.strictMode
-                                      ? (violCount > 0 ? `<span class="text-red-600 font-bold">⚠ ${violCount} alert(s)</span>` : `<span class="text-emerald-600">Clean</span>`)
+                                      ? (violations.length > 0
+                                          ? `<div class="text-red-600 font-bold">⚠ ${violations.length} alert(s)</div><div class="text-[11px] text-red-700 leading-snug mt-0.5">${violations.join("; ")}</div>`
+                                          : `<span class="text-emerald-600 font-semibold">✓ Clean</span>`)
                                       : `<span class="text-slate-400">Standard</span>`}
                                   </td>
                                   <td class="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
@@ -3798,7 +4331,7 @@
                                       <button onclick="reopenAssignmentSubmission('${subKey}')" title="Clear submission so student can retake" class="px-2.5 py-1.5 rounded-lg border border-amberwarm-400 bg-amberwarm-50 text-amberwarm-600 text-xs font-bold hover:bg-amberwarm-100">↺ Reopen</button>
                                     ` : ''}
                                     ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
-                                      <button onclick="activeReviewKey='${subKey}'; render();" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50">Review</button>
+                                      <button onclick="openSubmissionReview('${subKey}')" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50">Review</button>
                                       <button onclick="openPrintablePortfolio('submission', '${a.id}', '${stu.id}')" class="px-3 py-1.5 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
                                     ` : ''}
                                   </td>
@@ -3838,7 +4371,7 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 5: STUDENTS & GMAIL ACCESS -->
+          <!-- PARENT TAB 6: SETTINGS & GMAIL ACCESS -->
           ${parentTab === "students" ? `
             <div class="grid md:grid-cols-2 gap-6">
               <div class="space-y-4">
@@ -3931,7 +4464,7 @@
       return `
         <div class="max-w-3xl mx-auto">
           <div class="flex items-center justify-between mb-4">
-            <button onclick="activeReviewKey=null; render();" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">
+            <button onclick="closeSubmissionReview()" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">
               ← Back to Parent Hub
             </button>
             <button onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold hover:bg-amberwarm-400 hover:text-ink">
@@ -3953,7 +4486,7 @@
 
             ${sub.violations && sub.violations.length > 0 ? `
               <div class="mt-4 p-4 rounded-2xl bg-red-50 border border-red-200">
-                <p class="text-xs font-bold uppercase text-red-700 mb-1">⚠ Strict Test Mode Focus Log (${sub.violations.length} event)</p>
+                <p class="text-xs font-bold uppercase text-red-700 mb-1">⚠ Strict Test Mode Focus Log (${sub.violations.length} alert)</p>
                 <ul class="text-xs text-red-800 list-disc ml-4 space-y-1">
                   ${sub.violations.map(v => `<li>${v}</li>`).join("")}
                 </ul>
@@ -4136,6 +4669,11 @@
         </div>
       `;
     }
+
+    // Expose portfolio builders for Annual Review individual class printables
+    window.buildClassPortfolioHTML = buildClassPortfolioHTML;
+    window.getStudentById = getStudentById;
+    window.computeStudentMetrics = computeStudentMetrics;
 
     // Boot Application
     render();
