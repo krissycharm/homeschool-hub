@@ -324,6 +324,7 @@
     let authErrorText = "";
 
     let currentRole = "student";
+    let parentUnlockedSession = false; // Remembers parent unlock during current tab session so switching back & forth is effortless
     let authenticatedStudentId = appState.settings.students[0]?.id || "stu_1";
 
     // 8 Essential Daily Tabs for Student Portal
@@ -331,9 +332,13 @@
     let activeCourseSubject = appState.settings.subjects[0] || "Pre-Algebra";
     let assignmentFilterTab = "todo";
 
-    // Parent Hub Tabs
+    // Parent Hub Tabs & Edit States
     let parentTab = "overview";
+    let parentSyllabusSubject = appState.settings.subjects[0] || "Pre-Algebra";
     let parentStudentFilter = "All";
+    let editingLessonId = null;
+    let editingAssignmentId = null;
+    let editingScheduleId = null;
 
     // Detail Viewers
     let activeLessonId = null;
@@ -384,18 +389,21 @@
 
       if (whitelistKeys.length === 0 && !matchedStudentProfile) {
         currentRole = "parent";
+        parentUnlockedSession = true;
         authenticatedStudentId = appState.settings.students[0]?.id || "stu_1";
         return true;
       }
 
       if (matchedHardcoded) {
         currentRole = matchedHardcoded.role || "student";
+        if (currentRole === "parent") parentUnlockedSession = true;
         authenticatedStudentId = matchedHardcoded.studentId || appState.settings.students[0]?.id;
         return true;
       }
 
       if (matchedStudentProfile) {
         currentRole = "student";
+        parentUnlockedSession = false;
         authenticatedStudentId = matchedStudentProfile.id;
         return true;
       }
@@ -425,7 +433,7 @@
             activityLogs: remoteData.activityLogs || [],
             portfolioShowcase: remoteData.portfolioShowcase || []
           };
-          if (currentGoogleUser) resolveUserAccess(currentGoogleUser);
+          if (currentGoogleUser && authStatus === "loading") resolveUserAccess(currentGoogleUser);
           localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
           updateHeaderChrome();
           render();
@@ -454,6 +462,7 @@
           }
         } else {
           currentGoogleUser = null;
+          parentUnlockedSession = false;
           authStatus = "signed_out";
         }
         updateHeaderChrome();
@@ -477,6 +486,7 @@
 
     window.signOutGoogleUser = async function() {
       exitStrictSessionCleanup();
+      parentUnlockedSession = false;
       if (auth) {
         await signOut(auth);
       }
@@ -516,7 +526,11 @@
           return {
             ...structuredClone(DEFAULT_STATE),
             ...parsed,
-            settings: { ...DEFAULT_STATE.settings, ...(parsed.settings || {}) },
+            settings: {
+              ...DEFAULT_STATE.settings,
+              ...(parsed.settings || {}),
+              subjectDetails: { ...DEFAULT_STATE.settings.subjectDetails, ...(parsed.settings?.subjectDetails || {}) }
+            },
             submissions: parsed.submissions || {},
             lessons: parsed.lessons || [],
             assignments: parsed.assignments || [],
@@ -538,6 +552,7 @@
       if (!appState.schedule) appState.schedule = [];
       if (!appState.resources) appState.resources = [];
       if (!appState.settings.announcements) appState.settings.announcements = [];
+      if (!appState.settings.subjectDetails) appState.settings.subjectDetails = {};
 
       localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
       render();
@@ -829,10 +844,20 @@
     }
 
     // =========================================================================
-    // 8. ROLE SWITCHING & NAVIGATION
+    // 8. ROLE SWITCHING & NAVIGATION (INCLUDING 1-CLICK STUDENT PREVIEW)
     // =========================================================================
     window.openParentPinModal = function() {
       if (currentRole === "parent") return;
+      if (parentUnlockedSession) {
+        exitStrictSessionCleanup();
+        currentRole = "parent";
+        activeLessonId = null;
+        activeAssignmentId = null;
+        printableRecord = null;
+        updateRoleButtons();
+        render();
+        return;
+      }
       document.getElementById("parent-login-pin").value = "";
       document.getElementById("parent-login-error").classList.add("hidden");
       document.getElementById("parent-pin-modal").classList.remove("hidden");
@@ -848,6 +873,7 @@
       if (pin === appState.settings.parentPin) {
         closeParentPinModal();
         exitStrictSessionCleanup();
+        parentUnlockedSession = true;
         currentRole = "parent";
         activeLessonId = null;
         activeAssignmentId = null;
@@ -894,6 +920,9 @@
 
     window.setParentTab = function(tab) {
       parentTab = tab;
+      editingLessonId = null;
+      editingAssignmentId = null;
+      editingScheduleId = null;
       activeReviewKey = null;
       printableRecord = null;
       render();
@@ -1106,7 +1135,7 @@
     };
 
     // =========================================================================
-    // 10. PARENT BUILDER, SCHEDULE, RESOURCES, SYLLABUS, CSV IMPORT & GRADING
+    // 10. PARENT BUILDER, EDITORS, SCHEDULE, SYLLABUS TABS, CSV IMPORT & GRADING
     // =========================================================================
     let builderQuestions = [
       { id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }
@@ -1151,11 +1180,38 @@
       });
     };
 
+    window.startEditLesson = function(lessonId) {
+      const les = (appState.lessons || []).find(l => l.id === lessonId);
+      if (!les) return;
+      editingLessonId = lessonId;
+      parentTab = "create-lesson";
+      render();
+      setTimeout(() => {
+        document.getElementById("les_student").value = les.studentId || "stu_1";
+        document.getElementById("les_subject").value = les.subject;
+        document.getElementById("les_date").value = les.date || "";
+        document.getElementById("les_title").value = les.title || "";
+        document.getElementById("les_content").value = les.content || "";
+        document.getElementById("les_youtube").value = les.youtubeUrl || "";
+        document.getElementById("les_link").value = les.resourceLink || "";
+        document.getElementById("les_image").value = les.imageUrl || "";
+        document.getElementById("les_check_enabled").checked = Boolean(les.checkQuestion?.enabled);
+        document.getElementById("les_check_prompt").value = les.checkQuestion?.prompt || "";
+        const opts = les.checkQuestion?.options || ["", "", "", ""];
+        [0, 1, 2, 3].forEach(i => {
+          document.getElementById(`les_check_opt${i}`).value = opts[i] || "";
+        });
+        document.getElementById("les_check_correct").value = String(les.checkQuestion?.correctIndex ?? 0);
+      }, 20);
+    };
+
     window.publishNewLesson = function(e) {
       e.preventDefault();
       if (!appState.lessons) appState.lessons = [];
-      const newLesson = {
-        id: "les_" + Date.now(),
+      const existing = editingLessonId ? appState.lessons.find(l => l.id === editingLessonId) : null;
+
+      const lessonPayload = {
+        id: existing ? existing.id : "les_" + Date.now(),
         studentId: document.getElementById("les_student").value,
         subject: document.getElementById("les_subject").value,
         title: document.getElementById("les_title").value.trim(),
@@ -1175,12 +1231,39 @@
           ],
           correctIndex: Number(document.getElementById("les_check_correct").value)
         },
-        completedBy: {}
+        completedBy: existing?.completedBy || {},
+        checkPassedBy: existing?.checkPassedBy || {}
       };
 
-      appState.lessons.unshift(newLesson);
+      if (existing) {
+        const idx = appState.lessons.findIndex(l => l.id === editingLessonId);
+        appState.lessons[idx] = lessonPayload;
+        editingLessonId = null;
+      } else {
+        appState.lessons.unshift(lessonPayload);
+      }
+
       parentTab = "overview";
-      saveState("Lesson published!");
+      saveState(existing ? "Lesson updated!" : "Lesson published!");
+    };
+
+    window.startEditAssignment = function(assignmentId) {
+      const asg = (appState.assignments || []).find(a => a.id === assignmentId);
+      if (!asg) return;
+      editingAssignmentId = assignmentId;
+      builderQuestions = structuredClone(asg.questions || []);
+      parentTab = "create-assignment";
+      render();
+      setTimeout(() => {
+        document.getElementById("asg_student").value = asg.studentId || "stu_1";
+        document.getElementById("asg_subject").value = asg.subject;
+        document.getElementById("asg_type").value = asg.type || "Homework";
+        document.getElementById("asg_due").value = asg.dueDate || "";
+        document.getElementById("asg_title").value = asg.title || "";
+        document.getElementById("asg_linked_lesson").value = asg.linkedLessonId || "";
+        document.getElementById("asg_strict").checked = Boolean(asg.strictMode);
+        document.getElementById("asg_allow_link").checked = Boolean(asg.allowProjectLink);
+      }, 20);
     };
 
     window.publishNewAssignment = function(e) {
@@ -1193,8 +1276,10 @@
       }
 
       if (!appState.assignments) appState.assignments = [];
-      const newAsg = {
-        id: "asg_" + Date.now(),
+      const existing = editingAssignmentId ? appState.assignments.find(a => a.id === editingAssignmentId) : null;
+
+      const asgPayload = {
+        id: existing ? existing.id : "asg_" + Date.now(),
         studentId: document.getElementById("asg_student").value,
         subject: document.getElementById("asg_subject").value,
         title: document.getElementById("asg_title").value.trim(),
@@ -1206,25 +1291,54 @@
         questions: structuredClone(validQuestions)
       };
 
-      appState.assignments.unshift(newAsg);
+      if (existing) {
+        const idx = appState.assignments.findIndex(a => a.id === editingAssignmentId);
+        appState.assignments[idx] = asgPayload;
+        editingAssignmentId = null;
+      } else {
+        appState.assignments.unshift(asgPayload);
+      }
+
       builderQuestions = [{ id: "bq_" + Date.now(), type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
       parentTab = "overview";
-      saveState("Assignment published!");
+      saveState(existing ? "Assignment updated!" : "Assignment published!");
+    };
+
+    window.startEditScheduleBlock = function(id) {
+      const b = (appState.schedule || []).find(s => s.id === id);
+      if (!b) return;
+      editingScheduleId = id;
+      document.getElementById("sch_day").value = b.day;
+      document.getElementById("sch_category").value = b.category;
+      document.getElementById("sch_start").value = b.startTime;
+      document.getElementById("sch_end").value = b.endTime;
+      document.getElementById("sch_title").value = b.title;
+      document.getElementById("sch_subject").value = b.subject;
+      showSavedToast("Editing block above — click Add/Update Time Block to save");
     };
 
     window.addScheduleBlock = function(e) {
       e.preventDefault();
       if (!appState.schedule) appState.schedule = [];
-      appState.schedule.push({
-        id: "sch_" + Date.now(),
+      const blockPayload = {
+        id: editingScheduleId || "sch_" + Date.now(),
         day: document.getElementById("sch_day").value,
         startTime: document.getElementById("sch_start").value,
         endTime: document.getElementById("sch_end").value,
         title: document.getElementById("sch_title").value.trim(),
         category: document.getElementById("sch_category").value,
         subject: document.getElementById("sch_subject").value
-      });
-      saveState("Schedule block added!");
+      };
+
+      if (editingScheduleId) {
+        const idx = appState.schedule.findIndex(s => s.id === editingScheduleId);
+        if (idx !== -1) appState.schedule[idx] = blockPayload;
+        editingScheduleId = null;
+        saveState("Schedule block updated!");
+      } else {
+        appState.schedule.push(blockPayload);
+        saveState("Schedule block added!");
+      }
     };
 
     window.deleteScheduleBlock = function(id) {
@@ -1276,9 +1390,14 @@
       saveState("Resource deleted!");
     };
 
+    window.selectParentSyllabusTab = function(subj) {
+      parentSyllabusSubject = subj;
+      render();
+    };
+
     window.saveSubjectSyllabus = function(e) {
       e.preventDefault();
-      const subj = document.getElementById("syl_subject").value;
+      const subj = parentSyllabusSubject || (appState.settings.subjects || [])[0];
       if (!appState.settings.subjectDetails) appState.settings.subjectDetails = {};
       appState.settings.subjectDetails[subj] = {
         currentUnit: document.getElementById("syl_unit").value.trim(),
@@ -1731,6 +1850,15 @@
       ];
 
       return `
+        ${parentUnlockedSession ? `
+          <div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex items-center justify-between shadow-sm">
+            <span>👁 <strong>Student Preview Mode:</strong> You are viewing the hub exactly as ${student.name} sees it.</span>
+            <button onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white font-bold">
+              Return to Parent Hub →
+            </button>
+          </div>
+        ` : ''}
+
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-400/25">
           <nav class="flex items-center gap-1 sm:gap-2 overflow-x-auto py-1">
             ${navItems.map(item => `
@@ -2778,15 +2906,21 @@
       const subs = appState.submissions || {};
       const pendingSubKeys = Object.keys(subs).filter(k => subs[k]?.status === "needs_review");
       const students = appState.settings.students || [];
+      const subjects = appState.settings.subjects || [];
+      if (!subjects.includes(parentSyllabusSubject)) parentSyllabusSubject = subjects[0] || "";
+      const activeSylObj = appState.settings.subjectDetails?.[parentSyllabusSubject] || { currentUnit: "", syllabus: "" };
 
       return `
         <div class="bg-white/95 backdrop-blur rounded-3xl p-6 sm:p-8 border border-white shadow-sm">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Upload CSV curriculum plans, manage schedules &amp; Google Calendar sync, build quizzes, grade work, and manage student Gmail access.</p>
+              <p class="text-sm text-slate-500">Upload CSV curriculum plans, manage schedules &amp; syllabi, build/edit lessons &amp; quizzes, and preview Student View.</p>
             </div>
             <div class="flex flex-wrap gap-2">
+              <button onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 hover:bg-amberwarm-500 text-ink text-xs font-extrabold shadow-sm">
+                👁 Preview Student View
+              </button>
               <label class="px-3.5 py-2 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold cursor-pointer shadow-sm">
                 ⬆ Import Curriculum (CSV)
                 <input type="file" accept=".csv" onchange="handleCurriculumCSVUpload(event)" class="hidden" />
@@ -2806,8 +2940,8 @@
           <div class="flex gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
             ${[
               { id: "overview", label: "Overview & Announcements" },
-              { id: "create-lesson", label: "+ New Lesson" },
-              { id: "create-assignment", label: "+ New Homework / Quiz" },
+              { id: "create-lesson", label: editingLessonId ? "✎ Edit Lesson" : "+ New Lesson" },
+              { id: "create-assignment", label: editingAssignmentId ? "✎ Edit Homework / Quiz" : "+ New Homework / Quiz" },
               { id: "schedule-hub", label: "Schedule, Syllabus & Resources" },
               { id: "gradebook", label: "Gradebook & Logs", badge: pendingSubKeys.length },
               { id: "students", label: "Students & Gmail Access" }
@@ -2888,7 +3022,8 @@
                           </div>
                           <p class="font-semibold text-sm text-ink mt-0.5">${l.title}</p>
                         </div>
-                        <div class="flex items-center gap-1.5">
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          <button onclick="startEditLesson('${l.id}')" title="View / Edit Lesson" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-ink font-bold text-xs">✎ Edit</button>
                           <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${l.studentId === 'ALL' ? students[0]?.id : l.studentId}')" title="Print Portfolio Record" class="p-2 text-slate-500 hover:text-ink text-xs">🖨</button>
                           <button onclick="deleteItem('lesson', '${l.id}')" title="Delete" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
                         </div>
@@ -2918,7 +3053,10 @@
                           <p class="font-semibold text-sm text-ink mt-0.5">${a.title}</p>
                           <span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span>
                         </div>
-                        <button onclick="deleteItem('assignment', '${a.id}')" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
+                        <div class="flex items-center gap-1.5 shrink-0">
+                          <button onclick="startEditAssignment('${a.id}')" title="View / Edit Assignment" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-ink font-bold text-xs">✎ Edit</button>
+                          <button onclick="deleteItem('assignment', '${a.id}')" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
+                        </div>
                       </div>
                     `;
                   }).join("")}
@@ -2927,10 +3065,13 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 2: CREATE LESSON -->
+          <!-- PARENT TAB 2: CREATE / EDIT LESSON -->
           ${parentTab === "create-lesson" ? `
             <form onsubmit="publishNewLesson(event)" class="max-w-3xl space-y-5">
-              <h3 class="text-xl font-display font-extrabold text-ink">Create Class Lesson</h3>
+              <div class="flex items-center justify-between">
+                <h3 class="text-xl font-display font-extrabold text-ink">${editingLessonId ? 'Edit Class Lesson' : 'Create Class Lesson'}</h3>
+                ${editingLessonId ? `<button type="button" onclick="setParentTab('overview')" class="text-xs font-bold text-slate-500 hover:underline">Cancel Edit</button>` : ''}
+              </div>
               <div class="grid sm:grid-cols-3 gap-4">
                 <div>
                   <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To Student</label>
@@ -2942,7 +3083,7 @@
                 <div>
                   <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
                   <select id="les_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    ${(appState.settings.subjects || []).map(s => `<option value="${s}">${s}</option>`).join("")}
+                    ${subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
                   </select>
                 </div>
                 <div>
@@ -3008,15 +3149,18 @@
               </div>
 
               <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
-                Publish Lesson to Student Hub
+                ${editingLessonId ? 'Save Lesson Changes ✓' : 'Publish Lesson to Student Hub'}
               </button>
             </form>
           ` : ''}
 
-          <!-- PARENT TAB 3: CREATE HOMEWORK / ASSESSMENT -->
+          <!-- PARENT TAB 3: CREATE / EDIT HOMEWORK / ASSESSMENT -->
           ${parentTab === "create-assignment" ? `
             <form onsubmit="publishNewAssignment(event)" class="max-w-3xl space-y-6">
-              <h3 class="text-xl font-display font-extrabold text-ink">Build Homework or Assessment</h3>
+              <div class="flex items-center justify-between">
+                <h3 class="text-xl font-display font-extrabold text-ink">${editingAssignmentId ? 'Edit Homework or Assessment' : 'Build Homework or Assessment'}</h3>
+                ${editingAssignmentId ? `<button type="button" onclick="setParentTab('overview')" class="text-xs font-bold text-slate-500 hover:underline">Cancel Edit</button>` : ''}
+              </div>
 
               <div class="grid sm:grid-cols-4 gap-4">
                 <div>
@@ -3029,7 +3173,7 @@
                 <div>
                   <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
                   <select id="asg_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    ${(appState.settings.subjects || []).map(s => `<option value="${s}">${s}</option>`).join("")}
+                    ${subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
                   </select>
                 </div>
                 <div>
@@ -3111,14 +3255,14 @@
                       </div>
                     </div>
 
-                    <input type="text" id="bq_prompt_${idx}" value="${q.prompt.replace(/"/g, '&quot;')}"
+                    <input type="text" id="bq_prompt_${idx}" value="${(q.prompt || '').replace(/"/g, '&quot;')}"
                       placeholder="Question prompt (supports LaTeX like $2x + 5 = 15$)..."
                       class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
 
                     ${q.type === "mcq" ? `
                       <div class="grid sm:grid-cols-2 gap-2">
                         ${[0,1,2,3].map(oIdx => `
-                          <input type="text" id="bq_opt_${idx}_${oIdx}" value="${(q.options[oIdx] || '').replace(/"/g, '&quot;')}"
+                          <input type="text" id="bq_opt_${idx}_${oIdx}" value="${((q.options && q.options[oIdx]) || '').replace(/"/g, '&quot;')}"
                             placeholder="Choice ${oIdx + 1}" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
                         `).join("")}
                       </div>
@@ -3154,12 +3298,12 @@
               </div>
 
               <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
-                Publish Assignment
+                ${editingAssignmentId ? 'Save Assignment Changes ✓' : 'Publish Assignment'}
               </button>
             </form>
           ` : ''}
 
-          <!-- PARENT TAB 4: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS & RESOURCES -->
+          <!-- PARENT TAB 4: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS TABS & RESOURCES -->
           ${parentTab === "schedule-hub" ? `
             <div class="space-y-8">
               <div class="grid lg:grid-cols-2 gap-6">
@@ -3184,17 +3328,22 @@
                     <input type="time" id="sch_end" value="10:00" required class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs" />
                     <input type="text" id="sch_title" required placeholder="Block Title (e.g. Algebra Study)" class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs" />
                     <select id="sch_subject" class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs">
-                      ${(appState.settings.subjects || []).map(s => `<option value="${s}">${s}</option>`).join("")}
+                      ${subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
                       <option value="All Subjects">All Subjects</option>
                     </select>
-                    <button type="submit" class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">+ Add Time Block</button>
+                    <button type="submit" class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">
+                      ${editingScheduleId ? '✓ Update Time Block' : '+ Add Time Block'}
+                    </button>
                   </form>
 
                   <div class="space-y-2 max-h-60 overflow-y-auto">
                     ${(appState.schedule || []).map(b => `
-                      <div class="flex items-center justify-between text-xs p-2.5 rounded-xl border border-slate-200/70 bg-white">
+                      <div class="flex items-center justify-between text-xs p-2.5 rounded-xl border border-slate-200/70 bg-white gap-2">
                         <span><strong>${b.day} ${b.startTime}-${b.endTime}:</strong> ${b.title} (${b.category})</span>
-                        <button onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold ml-2">✕</button>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <button onclick="startEditScheduleBlock('${b.id}')" class="text-tealhub-600 font-bold hover:underline">✎ Edit</button>
+                          <button onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold">✕</button>
+                        </div>
                       </div>
                     `).join("")}
                   </div>
@@ -3210,14 +3359,42 @@
                     <button type="submit" class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold">Save Calendar Link</button>
                   </form>
 
-                  <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3">
-                    <h3 class="font-bold text-ink">📚 Edit Course Syllabus &amp; Current Unit</h3>
-                    <select id="syl_subject" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white">
-                      ${(appState.settings.subjects || []).map(s => `<option value="${s}">${s}</option>`).join("")}
-                    </select>
-                    <input type="text" id="syl_unit" placeholder="Current Unit (e.g., Unit 3: Linear Functions)" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
-                    <textarea id="syl_text" rows="3" placeholder="Course syllabus & semester overview..." class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white"></textarea>
-                    <button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">Update Course Syllabus</button>
+                  <!-- COURSE SYLLABUS & CURRENT UNIT WITH SUBJECT TABS & LIVE PRE-FILLED DATA -->
+                  <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3.5">
+                    <div class="flex items-center justify-between">
+                      <h3 class="font-bold text-ink">📚 Course Syllabus &amp; Current Unit</h3>
+                      <span class="text-[11px] font-bold text-sage-700 bg-sage-100 px-2.5 py-0.5 rounded-full">Synced with Student Hub</span>
+                    </div>
+
+                    <div class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2.5">
+                      ${subjects.map(s => `
+                        <button type="button" onclick="selectParentSyllabusTab('${s}')"
+                          class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                            parentSyllabusSubject === s
+                              ? 'bg-tealhub-500 text-white shadow-sm'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:text-ink'
+                          }">
+                          ${s}
+                        </button>
+                      `).join("")}
+                    </div>
+
+                    <div>
+                      <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Current Unit (${parentSyllabusSubject})</label>
+                      <input type="text" id="syl_unit" value="${(activeSylObj.currentUnit || '').replace(/"/g, '&quot;')}"
+                        placeholder="Current Unit (e.g., Unit 3: Linear Functions)"
+                        class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white font-semibold text-ink" />
+                    </div>
+
+                    <div>
+                      <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Course Syllabus &amp; Semester Overview</label>
+                      <textarea id="syl_text" rows="4" placeholder="Course syllabus & semester overview..."
+                        class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white text-slate-800 leading-relaxed">${activeSylObj.syllabus || ''}</textarea>
+                    </div>
+
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold">
+                      Save ${parentSyllabusSubject} Syllabus ✓
+                    </button>
                   </form>
                 </div>
               </div>
@@ -3427,7 +3604,7 @@
                 </div>
                 <div>
                   <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subjects (Comma-Separated)</label>
-                  <input type="text" id="set_subjects" value="${(appState.settings.subjects || []).join(', ')}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                  <input type="text" id="set_subjects" value="${subjects.join(', ')}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
                 </div>
                 <button type="submit" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Save Settings</button>
               </form>
