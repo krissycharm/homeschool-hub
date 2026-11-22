@@ -145,7 +145,7 @@
   </div>
 
   <!-- =====================================================================
-       PARENT PIN MODAL (SECONDARY PROTECTION EVEN WHEN SIGNED IN)
+       PARENT PIN MODAL
   ====================================================================== -->
   <div id="parent-pin-modal" class="fixed inset-0 z-40 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 no-print">
     <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
@@ -225,15 +225,15 @@
     // =========================================================================
     // 1. FIREBASE CONFIGURATION (PASTE YOUR FREE FIREBASE KEYS HERE)
     // =========================================================================
-  const firebaseConfig = {
-    apiKey: "AIzaSyDscZ7MgKhibd8NTCCm4syElUaTj9o3KTk",
-    authDomain: "sunshine-homeschool.firebaseapp.com",
-    databaseURL: "https://sunshine-homeschool-default-rtdb.firebaseio.com",
-    projectId: "sunshine-homeschool",
-    storageBucket: "sunshine-homeschool.firebasestorage.app",
-    messagingSenderId: "345084784786",
-    appId: "1:345084784786:web:b2a176cb9dde61be40f64b"
-  };
+    const firebaseConfig = {
+      apiKey: "",            // e.g. "AIzaSy..."
+      authDomain: "",        // e.g. "my-homeschool.firebaseapp.com"
+      databaseURL: "",       // e.g. "https://my-homeschool-default-rtdb.firebaseio.com"
+      projectId: "",         // e.g. "my-homeschool"
+      storageBucket: "",     // e.g. "my-homeschool.appspot.com"
+      messagingSenderId: "", // e.g. "123456789"
+      appId: ""              // e.g. "1:123456:web:abcdef"
+    };
 
     // Leave empty so zero personal emails appear in public code; Firebase Rules enforce access privately.
     const FAMILY_GOOGLE_ACCOUNTS = {};
@@ -333,8 +333,10 @@
     let activeCourseSubject = appState.settings.subjects[0] || "Pre-Algebra";
     let assignmentFilterTab = "todo";
 
-    // Parent Hub Tabs & Edit States
+    // Parent Hub Tabs & Subject Workspace States
     let parentTab = "overview";
+    let parentSubjectTab = appState.settings.subjects[0] || "Pre-Algebra";
+    let parentSubjectEditorMode = null; // null | "lesson" | "assignment"
     let parentSyllabusSubject = appState.settings.subjects[0] || "Pre-Algebra";
     let parentStudentFilter = "All";
     let editingLessonId = null;
@@ -571,10 +573,18 @@
       }
     }
 
-    // Helper Getters
+    // Helper Getters (Including Teacher Sandbox as a visible student in Parent Hub)
+    function getAllStudentsIncludingSandbox() {
+      const realStudents = appState.settings.students || [];
+      return [
+        ...realStudents,
+        { id: SANDBOX_STUDENT_ID, name: "Teacher Sandbox", gradeLevel: "Preview Account", email: "" }
+      ];
+    }
+
     function getStudentById(id) {
       if (id === SANDBOX_STUDENT_ID) {
-        return { id: SANDBOX_STUDENT_ID, name: "Preview Student", gradeLevel: "8th Grade", email: "" };
+        return { id: SANDBOX_STUDENT_ID, name: "Teacher Sandbox", gradeLevel: "Preview Account", email: "" };
       }
       return (appState.settings.students || []).find(s => s.id === id) || appState.settings.students[0];
     }
@@ -729,7 +739,7 @@
     };
 
     // =========================================================================
-    // 6. KATEX MATH & MARKDOWN-LITE HELPER
+    // 6. KATEX MATH & MARKDOWN-LITE HELPER (AUTO-WRAPS BARE EQUATIONS IN OPTIONS)
     // =========================================================================
     function formatRichText(raw) {
       if (!raw) return "";
@@ -746,7 +756,30 @@
       return safe;
     }
 
-    function triggerMathRender() {
+    function formatMathOption(raw) {
+      if (!raw) return "";
+      let str = String(raw)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .trim();
+
+      // If already contains $ delimiters, return as-is for KaTeX auto-render
+      if (str.includes("$")) return str;
+
+      // Auto-wrap bare algebraic expressions/equations (e.g., "y = x^2 - 4", "y = 6/x", "x^4", "0.5 g/cm^3")
+      const looksLikePureMath =
+        /^[a-zA-Z0-9\s\+\-\*\/\^\=\(\)\.\,\{\}\[\]\<\>\|\_]+$/.test(str) &&
+        (/[\^]/.test(str) || /^[a-zA-Z]\s*=/.test(str) || /\b\d+\/[a-zA-Z]\b/.test(str));
+
+      if (looksLikePureMath) {
+        const latexReady = str.replace(/(\d+)\/([a-zA-Z0-9]+)/g, "\\frac{$1}{$2}");
+        return `$${latexReady}$`;
+      }
+      return str;
+    }
+
+    function triggerMathRender(retries = 6) {
       if (window.renderMathInElement) {
         window.renderMathInElement(document.body, {
           delimiters: [
@@ -755,6 +788,8 @@
           ],
           throwOnError: false
         });
+      } else if (retries > 0) {
+        setTimeout(() => triggerMathRender(retries - 1), 150);
       }
     }
 
@@ -906,7 +941,6 @@
     window.switchToStudentView = function() {
       exitStrictSessionCleanup();
       currentRole = "student";
-      // When parent previews Student Hub, isolate into Sandbox Tester so student's real account stays untouched
       if (parentUnlockedSession) {
         authenticatedStudentId = SANDBOX_STUDENT_ID;
       }
@@ -914,6 +948,24 @@
       activeAssignmentId = null;
       activeReviewKey = null;
       printableRecord = null;
+      updateRoleButtons();
+      render();
+    };
+
+    window.previewItemInStudentView = function(kind, id, subj) {
+      exitStrictSessionCleanup();
+      currentRole = "student";
+      if (parentUnlockedSession) {
+        authenticatedStudentId = SANDBOX_STUDENT_ID;
+      }
+      if (subj) activeCourseSubject = subj;
+      if (kind === "lesson") {
+        activeLessonId = id;
+        activeAssignmentId = null;
+      } else {
+        activeAssignmentId = id;
+        activeLessonId = null;
+      }
       updateRoleButtons();
       render();
     };
@@ -961,12 +1013,46 @@
 
     window.setParentTab = function(tab) {
       parentTab = tab;
+      parentSubjectEditorMode = null;
       editingLessonId = null;
       editingAssignmentId = null;
       editingScheduleId = null;
       activeReviewKey = null;
       printableRecord = null;
       render();
+    };
+
+    window.selectParentSubjectTab = function(subj) {
+      parentSubjectTab = subj;
+      parentSubjectEditorMode = null;
+      editingLessonId = null;
+      editingAssignmentId = null;
+      render();
+    };
+
+    window.openNewLessonInSubject = function(subj) {
+      parentTab = "subjects-hub";
+      parentSubjectTab = subj || parentSubjectTab;
+      parentSubjectEditorMode = "lesson";
+      editingLessonId = null;
+      render();
+      setTimeout(() => {
+        const subjSel = document.getElementById("les_subject");
+        if (subjSel) subjSel.value = parentSubjectTab;
+      }, 20);
+    };
+
+    window.openNewAssignmentInSubject = function(subj) {
+      parentTab = "subjects-hub";
+      parentSubjectTab = subj || parentSubjectTab;
+      parentSubjectEditorMode = "assignment";
+      editingAssignmentId = null;
+      builderQuestions = [{ id: "bq_" + Date.now(), type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
+      render();
+      setTimeout(() => {
+        const subjSel = document.getElementById("asg_subject");
+        if (subjSel) subjSel.value = parentSubjectTab;
+      }, 20);
     };
 
     window.quickToggleLessonFromChecklist = function(lessonId) {
@@ -1225,7 +1311,9 @@
       const les = (appState.lessons || []).find(l => l.id === lessonId);
       if (!les) return;
       editingLessonId = lessonId;
-      parentTab = "create-lesson";
+      parentTab = "subjects-hub";
+      parentSubjectTab = les.subject || parentSubjectTab;
+      parentSubjectEditorMode = "lesson";
       render();
       setTimeout(() => {
         document.getElementById("les_student").value = les.studentId || "stu_1";
@@ -1250,11 +1338,12 @@
       e.preventDefault();
       if (!appState.lessons) appState.lessons = [];
       const existing = editingLessonId ? appState.lessons.find(l => l.id === editingLessonId) : null;
+      const chosenSubject = document.getElementById("les_subject").value;
 
       const lessonPayload = {
         id: existing ? existing.id : "les_" + Date.now(),
         studentId: document.getElementById("les_student").value,
-        subject: document.getElementById("les_subject").value,
+        subject: chosenSubject,
         title: document.getElementById("les_title").value.trim(),
         date: document.getElementById("les_date").value,
         content: document.getElementById("les_content").value.trim(),
@@ -1284,7 +1373,9 @@
         appState.lessons.unshift(lessonPayload);
       }
 
-      parentTab = "overview";
+      parentTab = "subjects-hub";
+      parentSubjectTab = chosenSubject;
+      parentSubjectEditorMode = null;
       saveState(existing ? "Lesson updated!" : "Lesson published!");
     };
 
@@ -1293,7 +1384,9 @@
       if (!asg) return;
       editingAssignmentId = assignmentId;
       builderQuestions = structuredClone(asg.questions || []);
-      parentTab = "create-assignment";
+      parentTab = "subjects-hub";
+      parentSubjectTab = asg.subject || parentSubjectTab;
+      parentSubjectEditorMode = "assignment";
       render();
       setTimeout(() => {
         document.getElementById("asg_student").value = asg.studentId || "stu_1";
@@ -1318,11 +1411,12 @@
 
       if (!appState.assignments) appState.assignments = [];
       const existing = editingAssignmentId ? appState.assignments.find(a => a.id === editingAssignmentId) : null;
+      const chosenSubject = document.getElementById("asg_subject").value;
 
       const asgPayload = {
         id: existing ? existing.id : "asg_" + Date.now(),
         studentId: document.getElementById("asg_student").value,
-        subject: document.getElementById("asg_subject").value,
+        subject: chosenSubject,
         title: document.getElementById("asg_title").value.trim(),
         type: document.getElementById("asg_type").value,
         dueDate: document.getElementById("asg_due").value,
@@ -1341,7 +1435,9 @@
       }
 
       builderQuestions = [{ id: "bq_" + Date.now(), type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
-      parentTab = "overview";
+      parentTab = "subjects-hub";
+      parentSubjectTab = chosenSubject;
+      parentSubjectEditorMode = null;
       saveState(existing ? "Assignment updated!" : "Assignment published!");
     };
 
@@ -1372,7 +1468,7 @@
       document.getElementById("sch_end").value = b.endTime;
       document.getElementById("sch_title").value = b.title;
       document.getElementById("sch_subject").value = b.subject;
-      showSavedToast("Editing block above — click Add/Update Time Block to save");
+      showSavedToast("Editing block above — click Update Time Block to save");
     };
 
     window.addScheduleBlock = function(e) {
@@ -1703,7 +1799,7 @@
 
     window.exportGradesCSV = function() {
       const rows = [["Student", "Subject", "Assignment Title", "Type", "Due Date", "Status", "Earned Points", "Total Points", "Percentage", "Strict Violations"]];
-      (appState.settings.students || []).forEach(stu => {
+      getAllStudentsIncludingSandbox().forEach(stu => {
         (appState.assignments || []).filter(a => isAssignmentVisibleToStudent(a, stu.id)).forEach(asg => {
           const sub = (appState.submissions || {})[getSubKey(stu.id, asg.id)];
           const status = sub ? sub.status : "Not Started";
@@ -1912,7 +2008,7 @@
       return `
         ${parentUnlockedSession ? `
           <div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm">
-            <span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing interactions safely—Isabel's real account and grades are completely untouched.</span>
+            <span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing interactions safely—your student's real account stays untouched.</span>
             <div class="flex items-center gap-2">
               <button onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold">
                 ↺ Reset Test Progress
@@ -2238,14 +2334,10 @@
       `;
     }
 
-    // --- TAB 3: SUBJECTS / COURSES (CHRONOLOGICAL COURSE ROADMAP) ---
-    function renderTabSubjects(student, metrics) {
-      const subjects = appState.settings.subjects || [];
-      if (!subjects.includes(activeCourseSubject)) activeCourseSubject = subjects[0] || "";
-      const details = appState.settings.subjectDetails?.[activeCourseSubject] || {};
-
-      const lessonItems = metrics.myLessons
-        .filter(l => l.subject === activeCourseSubject)
+    // --- HELPER: BUILD CHRONOLOGICAL TIMELINE FOR A SUBJECT ---
+    function getChronologicalTimelineForSubject(subject, lessonsList, assignmentsList) {
+      const lessonItems = lessonsList
+        .filter(l => l.subject === subject)
         .map(l => ({
           kind: "lesson",
           sortDate: l.date || "9999-12-31",
@@ -2253,8 +2345,8 @@
           data: l
         }));
 
-      const assignmentItems = metrics.myAssignments
-        .filter(a => a.subject === activeCourseSubject)
+      const assignmentItems = assignmentsList
+        .filter(a => a.subject === subject)
         .map(a => ({
           kind: "assignment",
           sortDate: a.dueDate || "9999-12-31",
@@ -2262,7 +2354,7 @@
           data: a
         }));
 
-      const timeline = [...lessonItems, ...assignmentItems].sort((a, b) => {
+      return [...lessonItems, ...assignmentItems].sort((a, b) => {
         const dateCmp = a.sortDate.localeCompare(b.sortDate);
         if (dateCmp !== 0) return dateCmp;
         if (a.priority !== b.priority) return a.priority - b.priority;
@@ -2270,6 +2362,14 @@
         const bIsWarmup = (b.data.title || "").toLowerCase().includes("warm-up") ? 0 : 1;
         return aIsWarmup - bIsWarmup;
       });
+    }
+
+    // --- TAB 3: SUBJECTS / COURSES (CHRONOLOGICAL COURSE ROADMAP) ---
+    function renderTabSubjects(student, metrics) {
+      const subjects = appState.settings.subjects || [];
+      if (!subjects.includes(activeCourseSubject)) activeCourseSubject = subjects[0] || "";
+      const details = appState.settings.subjectDetails?.[activeCourseSubject] || {};
+      const timeline = getChronologicalTimelineForSubject(activeCourseSubject, metrics.myLessons, metrics.myAssignments);
 
       return `
         <div class="grid lg:grid-cols-4 gap-6">
@@ -2786,12 +2886,12 @@
             ${les.checkQuestion?.enabled ? `
               <div class="mt-10 p-6 rounded-2xl bg-amberwarm-50 border border-amberwarm-100">
                 <h3 class="font-display font-extrabold text-ink mb-2">Check for Understanding</h3>
-                <p class="text-sm text-slate-700 mb-4">${les.checkQuestion.prompt}</p>
+                <p class="text-sm text-slate-700 mb-4">${formatMathOption(les.checkQuestion.prompt)}</p>
                 <div class="space-y-2">
                   ${les.checkQuestion.options.map((opt, idx) => `
                     <label class="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-200 cursor-pointer hover:border-tealhub-500">
                       <input type="radio" name="lesson-check-opt" value="${idx}" ${(passedCheck || done) && idx === les.checkQuestion.correctIndex ? 'checked disabled' : ''} />
-                      <span class="text-sm text-slate-800">${opt}</span>
+                      <span class="text-sm text-slate-800">${formatMathOption(opt)}</span>
                     </label>
                   `).join("")}
                 </div>
@@ -2910,7 +3010,7 @@
                 <div class="bg-white rounded-3xl p-6 border border-white shadow-sm">
                   <div class="flex items-start justify-between gap-4 mb-4">
                     <p class="font-semibold text-ink text-base">
-                      <span class="text-tealhub-600 font-extrabold mr-1">${idx + 1}.</span> ${q.prompt}
+                      <span class="text-tealhub-600 font-extrabold mr-1">${idx + 1}.</span> ${formatMathOption(q.prompt)}
                     </p>
                     <span class="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 shrink-0">
                       ${isSubmitted ? `${qScore} / ${q.points} pts` : `${q.points} pts`}
@@ -2928,7 +3028,7 @@
                           <input type="radio" name="ans_${q.id}" value="${optIdx}"
                             ${String(userVal) === String(optIdx) ? 'checked' : ''}
                             ${isSubmitted ? 'disabled' : ''} />
-                          <span class="text-sm text-slate-800">${opt}</span>
+                          <span class="text-sm text-slate-800">${formatMathOption(opt)}</span>
                         </label>
                       `).join("")}
                     </div>
@@ -2998,22 +3098,25 @@
     }
 
     // -------------------------------------------------------------------------
-    // VIEW D: PARENT DASHBOARD & FULL CURRICULUM / SCHEDULE HUB
+    // VIEW D: PARENT DASHBOARD & UNIFIED SUBJECTS / CURRICULUM WORKSPACE
     // -------------------------------------------------------------------------
     function renderParentDashboard() {
       const subs = appState.submissions || {};
       const pendingSubKeys = Object.keys(subs).filter(k => subs[k]?.status === "needs_review");
-      const students = appState.settings.students || [];
+      const realStudents = appState.settings.students || [];
+      const allStudents = getAllStudentsIncludingSandbox();
       const subjects = appState.settings.subjects || [];
       if (!subjects.includes(parentSyllabusSubject)) parentSyllabusSubject = subjects[0] || "";
+      if (!subjects.includes(parentSubjectTab)) parentSubjectTab = subjects[0] || "";
       const activeSylObj = appState.settings.subjectDetails?.[parentSyllabusSubject] || { currentUnit: "", syllabus: "" };
+      const subjectRoadmap = getChronologicalTimelineForSubject(parentSubjectTab, appState.lessons || [], appState.assignments || []);
 
       return `
         <div class="bg-white/95 backdrop-blur rounded-3xl p-6 sm:p-8 border border-white shadow-sm">
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Upload CSV curriculum plans, manage schedules &amp; syllabi, build/edit lessons &amp; quizzes, and preview Student View.</p>
+              <p class="text-sm text-slate-500">Manage subjects, lessons &amp; quizzes, schedules, syllabi, gradebook, and Student Sandbox preview.</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 hover:bg-amberwarm-500 text-ink text-xs font-extrabold shadow-sm">
@@ -3038,8 +3141,7 @@
           <div class="flex gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
             ${[
               { id: "overview", label: "Overview & Announcements" },
-              { id: "create-lesson", label: editingLessonId ? "✎ Edit Lesson" : "+ New Lesson" },
-              { id: "create-assignment", label: editingAssignmentId ? "✎ Edit Homework / Quiz" : "+ New Homework / Quiz" },
+              { id: "subjects-hub", label: "Subjects & Curriculum" },
               { id: "schedule-hub", label: "Schedule, Syllabus & Resources" },
               { id: "gradebook", label: "Gradebook & Logs", badge: pendingSubKeys.length },
               { id: "students", label: "Students & Gmail Access" }
@@ -3101,307 +3203,357 @@
               ` : ''}
             </div>
 
-            <div class="grid md:grid-cols-2 gap-6">
-              <div class="bg-slate-50/60 rounded-2xl p-5 border border-slate-200/80">
-                <div class="flex items-center justify-between mb-4">
-                  <h3 class="font-bold text-ink">Class Lessons (${(appState.lessons || []).length})</h3>
-                  <button onclick="setParentTab('create-lesson')" class="text-xs font-bold text-tealhub-600 hover:underline">+ Add Lesson</button>
-                </div>
-                <div class="space-y-3">
-                  ${(appState.lessons || []).length === 0 ? `<p class="text-xs text-slate-400 italic">No lessons yet. Click "+ Add Lesson" or "Import Curriculum (CSV)" above.</p>` : ''}
-                  ${(appState.lessons || []).map(l => {
-                    const targetStu = l.studentId === "ALL" ? "All Students" : (getStudentById(l.studentId)?.name || "Student");
-                    return `
-                      <div class="p-3.5 rounded-xl border border-slate-200/70 bg-white flex items-center justify-between gap-2">
-                        <div>
-                          <div class="flex items-center gap-1.5">
-                            <span class="text-xs font-bold text-tealhub-600">${l.subject}</span>
-                            <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">${targetStu}</span>
-                          </div>
-                          <p class="font-semibold text-sm text-ink mt-0.5">${l.title}</p>
-                        </div>
-                        <div class="flex items-center gap-1.5 shrink-0">
-                          <button onclick="startEditLesson('${l.id}')" title="View / Edit Lesson" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-ink font-bold text-xs">✎ Edit</button>
-                          <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${l.studentId === 'ALL' ? students[0]?.id : l.studentId}')" title="Print Portfolio Record" class="p-2 text-slate-500 hover:text-ink text-xs">🖨</button>
-                          <button onclick="deleteItem('lesson', '${l.id}')" title="Delete" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
-                        </div>
-                      </div>
-                    `;
-                  }).join("")}
-                </div>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              ${subjects.map(subj => {
+                const lCount = (appState.lessons || []).filter(l => l.subject === subj).length;
+                const aCount = (appState.assignments || []).filter(a => a.subject === subj).length;
+                return `
+                  <div onclick="selectParentSubjectTab('${subj}'); parentTab='subjects-hub'; render();"
+                    class="p-5 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-white hover:shadow-sm cursor-pointer transition space-y-2">
+                    <span class="text-xs font-bold uppercase text-tealhub-600">Course Workspace</span>
+                    <h4 class="font-display font-extrabold text-base text-ink">${subj}</h4>
+                    <p class="text-xs text-slate-600">${lCount} Lesson(s) • ${aCount} Assignment(s)</p>
+                    <p class="text-xs font-bold text-tealhub-600 pt-1">Open Subject Roadmap →</p>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : ''}
+
+          <!-- PARENT TAB 2: UNIFIED SUBJECTS & CURRICULUM WORKSPACE -->
+          ${parentTab === "subjects-hub" ? `
+            <div class="grid lg:grid-cols-4 gap-6">
+              <div class="space-y-2">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500 px-1 mb-2">Select Subject</p>
+                ${subjects.map(subj => {
+                  const totalItems = (appState.lessons || []).filter(l => l.subject === subj).length +
+                                     (appState.assignments || []).filter(a => a.subject === subj).length;
+                  return `
+                    <button onclick="selectParentSubjectTab('${subj}')"
+                      class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm transition flex items-center justify-between ${
+                        parentSubjectTab === subj
+                          ? 'bg-tealhub-500 text-white shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border border-slate-200/70 hover:bg-slate-100'
+                      }">
+                      <span>${subj}</span>
+                      <span class="text-xs px-2 py-0.5 rounded-full ${parentSubjectTab === subj ? 'bg-white/20 text-white' : 'bg-white text-slate-600'}">${totalItems}</span>
+                    </button>
+                  `;
+                }).join("")}
               </div>
 
-              <div class="bg-slate-50/60 rounded-2xl p-5 border border-slate-200/80">
-                <div class="flex items-center justify-between mb-4">
-                  <h3 class="font-bold text-ink">Homework &amp; Quizzes (${(appState.assignments || []).length})</h3>
-                  <button onclick="setParentTab('create-assignment')" class="text-xs font-bold text-tealhub-600 hover:underline">+ Add Assignment</button>
+              <div class="lg:col-span-3 space-y-6">
+                <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80">
+                  <div>
+                    <span class="text-xs font-bold uppercase text-tealhub-600">Subject Curriculum Manager</span>
+                    <h3 class="text-xl font-display font-extrabold text-ink">${parentSubjectTab}</h3>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button onclick="openNewLessonInSubject('${parentSubjectTab}')"
+                      class="px-4 py-2 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold shadow-sm">
+                      + New Lesson
+                    </button>
+                    <button onclick="openNewAssignmentInSubject('${parentSubjectTab}')"
+                      class="px-4 py-2 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold shadow-sm">
+                      + New Homework / Quiz
+                    </button>
+                  </div>
                 </div>
-                <div class="space-y-3">
-                  ${(appState.assignments || []).length === 0 ? `<p class="text-xs text-slate-400 italic">No assignments yet. Click "+ Add Assignment" or "Import Curriculum (CSV)" above.</p>` : ''}
-                  ${(appState.assignments || []).map(a => {
-                    const targetStu = a.studentId === "ALL" ? "All Students" : (getStudentById(a.studentId)?.name || "Student");
-                    return `
-                      <div class="p-3.5 rounded-xl border border-slate-200/70 bg-white flex items-center justify-between gap-2">
+
+                <!-- INLINE LESSON CREATOR / EDITOR -->
+                ${parentSubjectEditorMode === "lesson" ? `
+                  <form onsubmit="publishNewLesson(event)" class="bg-slate-50/70 p-6 rounded-2xl border border-slate-200 space-y-5">
+                    <div class="flex items-center justify-between">
+                      <h4 class="text-lg font-display font-extrabold text-ink">${editingLessonId ? 'Edit Class Lesson' : `New ${parentSubjectTab} Lesson`}</h4>
+                      <button type="button" onclick="parentSubjectEditorMode=null; editingLessonId=null; render();" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
+                    </div>
+                    <div class="grid sm:grid-cols-3 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To Student</label>
+                        <select id="les_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          ${realStudents.map(s => `<option value="${s.id}">${s.name} (${s.gradeLevel})</option>`).join("")}
+                          <option value="ALL">All Students</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
+                        <select id="les_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          ${subjects.map(s => `<option value="${s}" ${s === parentSubjectTab ? 'selected' : ''}>${s}</option>`).join("")}
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Date</label>
+                        <input type="date" id="les_date" value="${new Date().toISOString().slice(0,10)}"
+                          class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Title</label>
+                      <input type="text" id="les_title" required placeholder="e.g., Pythagorean Theorem Applications"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Notes (Supports Markdown &amp; LaTeX Math: $x^2 + y^2 = z^2$)</label>
+                      <textarea id="les_content" rows="7" required placeholder="Write lesson notes here. Use ### for headings, **bold** for key terms, and $...$ or $$...$$ for math/science formulas."
+                        class="w-full px-4 py-3 rounded-xl border border-slate-300 text-sm font-mono bg-white"></textarea>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">YouTube Video URL (Optional)</label>
+                        <input type="url" id="les_youtube" placeholder="https://www.youtube.com/watch?v=..."
+                          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Study Guide / Google Doc Link (Optional)</label>
+                        <input type="url" id="les_link" placeholder="https://docs.google.com/..."
+                          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Reference Image URL (Optional)</label>
+                      <input type="url" id="les_image" placeholder="https://... (diagram or chart URL)"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                    </div>
+
+                    <div class="p-5 rounded-2xl bg-white border border-slate-200 space-y-3">
+                      <label class="flex items-center gap-2 font-bold text-sm text-ink cursor-pointer">
+                        <input type="checkbox" id="les_check_enabled" checked />
+                        Include "Check for Understanding" Mini-Question at bottom of lesson
+                      </label>
+                      <input type="text" id="les_check_prompt" placeholder="Quick check question prompt..."
+                        class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                      <div class="grid sm:grid-cols-2 gap-2">
+                        <input type="text" id="les_check_opt0" placeholder="Option A" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                        <input type="text" id="les_check_opt1" placeholder="Option B" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                        <input type="text" id="les_check_opt2" placeholder="Option C" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                        <input type="text" id="les_check_opt3" placeholder="Option D" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label class="text-xs font-semibold text-slate-600 mr-2">Correct Option:</label>
+                        <select id="les_check_correct" class="px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white">
+                          <option value="0">Option A</option>
+                          <option value="1">Option B</option>
+                          <option value="2">Option C</option>
+                          <option value="3">Option D</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
+                      ${editingLessonId ? 'Save Lesson Changes ✓' : 'Publish Lesson to Student Hub'}
+                    </button>
+                  </form>
+                ` : ''}
+
+                <!-- INLINE ASSIGNMENT / QUIZ CREATOR / EDITOR -->
+                ${parentSubjectEditorMode === "assignment" ? `
+                  <form onsubmit="publishNewAssignment(event)" class="bg-slate-50/70 p-6 rounded-2xl border border-slate-200 space-y-6">
+                    <div class="flex items-center justify-between">
+                      <h4 class="text-lg font-display font-extrabold text-ink">${editingAssignmentId ? 'Edit Homework or Assessment' : `New ${parentSubjectTab} Homework / Quiz`}</h4>
+                      <button type="button" onclick="parentSubjectEditorMode=null; editingAssignmentId=null; render();" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
+                    </div>
+
+                    <div class="grid sm:grid-cols-4 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To</label>
+                        <select id="asg_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          ${realStudents.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}
+                          <option value="ALL">All Students</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
+                        <select id="asg_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          ${subjects.map(s => `<option value="${s}" ${s === parentSubjectTab ? 'selected' : ''}>${s}</option>`).join("")}
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Type</label>
+                        <select id="asg_type" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          <option value="Homework">Homework</option>
+                          <option value="Quiz">Quiz</option>
+                          <option value="Test">Test</option>
+                          <option value="Project">Project</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Due Date</label>
+                        <input type="date" id="asg_due" value="${new Date().toISOString().slice(0,10)}"
+                          class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assignment Title</label>
+                        <input type="text" id="asg_title" required placeholder="e.g., Chapter 4 Algebra Quiz"
+                          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Unlock After Lesson (Optional)</label>
+                        <select id="asg_linked_lesson" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          <option value="">Available Immediately</option>
+                          ${(appState.lessons || []).map(l => `<option value="${l.id}">${l.subject}: ${l.title}</option>`).join("")}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      <div class="p-4 rounded-2xl bg-red-50/70 border border-red-100 flex items-start gap-3">
+                        <input type="checkbox" id="asg_strict" class="mt-1 w-4 h-4 accent-red-600" />
                         <div>
-                          <div class="flex items-center gap-1.5">
-                            <span class="text-xs font-bold text-slate-600">${a.subject}</span>
-                            <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">${targetStu}</span>
-                            ${a.strictMode ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">STRICT</span>` : ''}
-                          </div>
-                          <p class="font-semibold text-sm text-ink mt-0.5">${a.title}</p>
-                          <span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span>
-                        </div>
-                        <div class="flex items-center gap-1.5 shrink-0">
-                          <button onclick="startEditAssignment('${a.id}')" title="View / Edit Assignment" class="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-ink font-bold text-xs">✎ Edit</button>
-                          <button onclick="deleteItem('assignment', '${a.id}')" class="p-2 text-red-400 hover:text-red-600 text-xs">✕</button>
+                          <label for="asg_strict" class="font-bold text-xs text-red-900 cursor-pointer">
+                            🔒 Enable Strict Test Mode (Anti-AI Lock)
+                          </label>
+                          <p class="text-[11px] text-red-700 mt-0.5">
+                            Requires Full-Screen, blocks copy/paste, and locks with Parent PIN on tab switch.
+                          </p>
                         </div>
                       </div>
-                    `;
+
+                      <div class="p-4 rounded-2xl bg-sage-50 border border-sage-100 flex items-start gap-3">
+                        <input type="checkbox" id="asg_allow_link" checked class="mt-1 w-4 h-4 accent-sage-600" />
+                        <div>
+                          <label for="asg_allow_link" class="font-bold text-xs text-sage-700 cursor-pointer">
+                            📎 Allow Google Drive / Docs Link
+                          </label>
+                          <p class="text-[11px] text-slate-600 mt-0.5">
+                            Lets the student paste a Google Drive, Docs, Slides, or photo URL when turning in work.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="space-y-4">
+                      <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-ink">Questions (${builderQuestions.length})</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ Multiple Choice</button>
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ True/False</button>
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ Fill-in-Blank</button>
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ Open-Ended</button>
+                        </div>
+                      </div>
+
+                      ${builderQuestions.map((q, idx) => `
+                        <div class="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                          <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold uppercase text-tealhub-600">Question ${idx + 1} • ${q.type.toUpperCase()}</span>
+                            <div class="flex items-center gap-2">
+                              <label class="text-xs text-slate-500">Points:</label>
+                              <input type="number" id="bq_pts_${idx}" value="${q.points}" min="1" max="100" class="w-16 px-2 py-1 rounded border border-slate-300 text-xs bg-white" />
+                              ${builderQuestions.length > 1 ? `<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 text-xs font-bold ml-2">Remove</button>` : ''}
+                            </div>
+                          </div>
+
+                          <input type="text" id="bq_prompt_${idx}" value="${(q.prompt || '').replace(/"/g, '&quot;')}"
+                            placeholder="Question prompt (supports LaTeX like $2x + 5 = 15$)..."
+                            class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+
+                          ${q.type === "mcq" ? `
+                            <div class="grid sm:grid-cols-2 gap-2">
+                              ${[0,1,2,3].map(oIdx => `
+                                <input type="text" id="bq_opt_${idx}_${oIdx}" value="${((q.options && q.options[oIdx]) || '').replace(/"/g, '&quot;')}"
+                                  placeholder="Choice ${oIdx + 1}" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+                              `).join("")}
+                            </div>
+                            <div>
+                              <label class="text-xs font-semibold text-slate-600 mr-2">Correct Choice:</label>
+                              <select id="bq_corr_${idx}" class="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white">
+                                ${[0,1,2,3].map(oIdx => `<option value="${oIdx}" ${String(q.correctAnswer) === String(oIdx) ? 'selected' : ''}>Choice ${oIdx + 1}</option>`).join("")}
+                              </select>
+                            </div>
+                          ` : ''}
+
+                          ${q.type === "tf" ? `
+                            <div>
+                              <label class="text-xs font-semibold text-slate-600 mr-2">Correct Answer:</label>
+                              <select id="bq_corr_${idx}" class="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white">
+                                <option value="True" ${q.correctAnswer === 'True' ? 'selected' : ''}>True</option>
+                                <option value="False" ${q.correctAnswer === 'False' ? 'selected' : ''}>False</option>
+                              </select>
+                            </div>
+                          ` : ''}
+
+                          ${q.type === "fill" ? `
+                            <input type="text" id="bq_corr_${idx}" value="${(q.correctAnswer || '').replace(/"/g, '&quot;')}"
+                              placeholder="Reference answer (optional — flagged for your review)"
+                              class="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+                          ` : ''}
+
+                          ${q.type === "open" ? `
+                            <p class="text-xs text-slate-500 italic">Open-ended responses are automatically flagged for your manual review and partial/full credit scoring.</p>
+                          ` : ''}
+                        </div>
+                      `).join("")}
+                    </div>
+
+                    <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
+                      ${editingAssignmentId ? 'Save Assignment Changes ✓' : 'Publish Assignment'}
+                    </button>
+                  </form>
+                ` : ''}
+
+                <!-- CHRONOLOGICAL SUBJECT ROADMAP LIST (ADD / EDIT / DELETE / PREVIEW) -->
+                <div class="space-y-3">
+                  ${subjectRoadmap.length === 0 ? `
+                    <div class="p-8 rounded-2xl border border-slate-200 bg-slate-50/50 text-center text-xs text-slate-500">
+                      No lessons or assignments in <strong>${parentSubjectTab}</strong> yet. Click <strong>+ New Lesson</strong> or <strong>+ New Homework / Quiz</strong> above.
+                    </div>
+                  ` : ''}
+
+                  ${subjectRoadmap.map(item => {
+                    if (item.kind === "lesson") {
+                      const l = item.data;
+                      return `
+                        <div class="p-4 rounded-2xl border-l-4 border-l-tealhub-500 border border-slate-200 bg-tealhub-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                              <span class="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-tealhub-500 text-white">📖 Lesson</span>
+                              <span class="text-xs font-bold text-slate-600">${l.date || ''}</span>
+                            </div>
+                            <p class="font-bold text-sm text-ink">${l.title}</p>
+                          </div>
+                          <div class="flex items-center gap-1.5 shrink-0">
+                            <button onclick="previewItemInStudentView('lesson', '${l.id}', '${l.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 hover:bg-amberwarm-400 text-ink font-bold text-xs">👁 Preview</button>
+                            <button onclick="startEditLesson('${l.id}')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-ink font-bold text-xs">✎ Edit</button>
+                            <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${realStudents[0]?.id || 'stu_1'}')" class="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-ink text-xs">🖨</button>
+                            <button onclick="deleteItem('lesson', '${l.id}')" class="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-red-500 hover:bg-red-50 text-xs font-bold">✕</button>
+                          </div>
+                        </div>
+                      `;
+                    } else {
+                      const a = item.data;
+                      const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+                      return `
+                        <div class="sm:ml-6 p-4 rounded-2xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                              <span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-700">${a.type}</span>
+                              <span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'} • ${a.questions.length} Qs (${totalPts} pts)</span>
+                              ${a.strictMode ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">STRICT</span>` : ''}
+                            </div>
+                            <p class="font-bold text-sm text-ink">${a.title}</p>
+                          </div>
+                          <div class="flex items-center gap-1.5 shrink-0">
+                            <button onclick="previewItemInStudentView('assignment', '${a.id}', '${a.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 hover:bg-amberwarm-400 text-ink font-bold text-xs">👁 Preview</button>
+                            <button onclick="startEditAssignment('${a.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-ink font-bold text-xs">✎ Edit</button>
+                            <button onclick="deleteItem('assignment', '${a.id}')" class="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-red-50 text-red-500 text-xs font-bold">✕</button>
+                          </div>
+                        </div>
+                      `;
+                    }
                   }).join("")}
                 </div>
               </div>
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 2: CREATE / EDIT LESSON -->
-          ${parentTab === "create-lesson" ? `
-            <form onsubmit="publishNewLesson(event)" class="max-w-3xl space-y-5">
-              <div class="flex items-center justify-between">
-                <h3 class="text-xl font-display font-extrabold text-ink">${editingLessonId ? 'Edit Class Lesson' : 'Create Class Lesson'}</h3>
-                ${editingLessonId ? `<button type="button" onclick="setParentTab('overview')" class="text-xs font-bold text-slate-500 hover:underline">Cancel Edit</button>` : ''}
-              </div>
-              <div class="grid sm:grid-cols-3 gap-4">
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To Student</label>
-                  <select id="les_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    ${students.map(s => `<option value="${s.id}">${s.name} (${s.gradeLevel})</option>`).join("")}
-                    <option value="ALL">All Students</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
-                  <select id="les_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    ${subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Date</label>
-                  <input type="date" id="les_date" value="${new Date().toISOString().slice(0,10)}"
-                    class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm" />
-                </div>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Title</label>
-                <input type="text" id="les_title" required placeholder="e.g., Pythagorean Theorem Applications"
-                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Notes (Supports Markdown &amp; LaTeX Math: $x^2 + y^2 = z^2$)</label>
-                <textarea id="les_content" rows="7" required placeholder="Write lesson notes here. Use ### for headings, **bold** for key terms, and $...$ or $$...$$ for math/science formulas."
-                  class="w-full px-4 py-3 rounded-xl border border-slate-300 text-sm font-mono"></textarea>
-              </div>
-
-              <div class="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">YouTube Video URL (Optional)</label>
-                  <input type="url" id="les_youtube" placeholder="https://www.youtube.com/watch?v=..."
-                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Study Guide / Google Doc Link (Optional)</label>
-                  <input type="url" id="les_link" placeholder="https://docs.google.com/..."
-                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-                </div>
-              </div>
-
-              <div>
-                <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Reference Image URL (Optional)</label>
-                <input type="url" id="les_image" placeholder="https://... (diagram or chart URL)"
-                  class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-              </div>
-
-              <div class="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-                <label class="flex items-center gap-2 font-bold text-sm text-ink cursor-pointer">
-                  <input type="checkbox" id="les_check_enabled" checked />
-                  Include "Check for Understanding" Mini-Question at bottom of lesson
-                </label>
-                <input type="text" id="les_check_prompt" placeholder="Quick check question prompt..."
-                  class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
-                <div class="grid sm:grid-cols-2 gap-2">
-                  <input type="text" id="les_check_opt0" placeholder="Option A" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
-                  <input type="text" id="les_check_opt1" placeholder="Option B" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
-                  <input type="text" id="les_check_opt2" placeholder="Option C" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
-                  <input type="text" id="les_check_opt3" placeholder="Option D" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
-                </div>
-                <div>
-                  <label class="text-xs font-semibold text-slate-600 mr-2">Correct Option:</label>
-                  <select id="les_check_correct" class="px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white">
-                    <option value="0">Option A</option>
-                    <option value="1">Option B</option>
-                    <option value="2">Option C</option>
-                    <option value="3">Option D</option>
-                  </select>
-                </div>
-              </div>
-
-              <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
-                ${editingLessonId ? 'Save Lesson Changes ✓' : 'Publish Lesson to Student Hub'}
-              </button>
-            </form>
-          ` : ''}
-
-          <!-- PARENT TAB 3: CREATE / EDIT HOMEWORK / ASSESSMENT -->
-          ${parentTab === "create-assignment" ? `
-            <form onsubmit="publishNewAssignment(event)" class="max-w-3xl space-y-6">
-              <div class="flex items-center justify-between">
-                <h3 class="text-xl font-display font-extrabold text-ink">${editingAssignmentId ? 'Edit Homework or Assessment' : 'Build Homework or Assessment'}</h3>
-                ${editingAssignmentId ? `<button type="button" onclick="setParentTab('overview')" class="text-xs font-bold text-slate-500 hover:underline">Cancel Edit</button>` : ''}
-              </div>
-
-              <div class="grid sm:grid-cols-4 gap-4">
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To</label>
-                  <select id="asg_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    ${students.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}
-                    <option value="ALL">All Students</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
-                  <select id="asg_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    ${subjects.map(s => `<option value="${s}">${s}</option>`).join("")}
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Type</label>
-                  <select id="asg_type" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    <option value="Homework">Homework</option>
-                    <option value="Quiz">Quiz</option>
-                    <option value="Test">Test</option>
-                    <option value="Project">Project</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Due Date</label>
-                  <input type="date" id="asg_due" value="${new Date().toISOString().slice(0,10)}"
-                    class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm" />
-                </div>
-              </div>
-
-              <div class="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assignment Title</label>
-                  <input type="text" id="asg_title" required placeholder="e.g., Chapter 4 Algebra Quiz"
-                    class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm" />
-                </div>
-                <div>
-                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Unlock After Lesson (Optional)</label>
-                  <select id="asg_linked_lesson" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm">
-                    <option value="">Available Immediately</option>
-                    ${(appState.lessons || []).map(l => `<option value="${l.id}">${l.subject}: ${l.title}</option>`).join("")}
-                  </select>
-                </div>
-              </div>
-
-              <div class="grid sm:grid-cols-2 gap-4">
-                <div class="p-4 rounded-2xl bg-red-50/70 border border-red-100 flex items-start gap-3">
-                  <input type="checkbox" id="asg_strict" class="mt-1 w-4 h-4 accent-red-600" />
-                  <div>
-                    <label for="asg_strict" class="font-bold text-xs text-red-900 cursor-pointer">
-                      🔒 Enable Strict Test Mode (Anti-AI Lock)
-                    </label>
-                    <p class="text-[11px] text-red-700 mt-0.5">
-                      Requires Full-Screen, blocks copy/paste, and locks with Parent PIN on tab switch.
-                    </p>
-                  </div>
-                </div>
-
-                <div class="p-4 rounded-2xl bg-sage-50 border border-sage-100 flex items-start gap-3">
-                  <input type="checkbox" id="asg_allow_link" checked class="mt-1 w-4 h-4 accent-sage-600" />
-                  <div>
-                    <label for="asg_allow_link" class="font-bold text-xs text-sage-700 cursor-pointer">
-                      📎 Allow Google Drive / Docs Link
-                    </label>
-                    <p class="text-[11px] text-slate-600 mt-0.5">
-                      Lets the student paste a Google Drive, Docs, Slides, or photo URL when turning in work.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="space-y-4">
-                <div class="flex items-center justify-between">
-                  <h4 class="font-bold text-ink">Questions (${builderQuestions.length})</h4>
-                  <div class="flex flex-wrap gap-1.5">
-                    <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold">+ Multiple Choice</button>
-                    <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold">+ True/False</button>
-                    <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold">+ Fill-in-Blank</button>
-                    <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-xs font-bold">+ Open-Ended</button>
-                  </div>
-                </div>
-
-                ${builderQuestions.map((q, idx) => `
-                  <div class="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-3">
-                    <div class="flex items-center justify-between">
-                      <span class="text-xs font-bold uppercase text-tealhub-600">Question ${idx + 1} • ${q.type.toUpperCase()}</span>
-                      <div class="flex items-center gap-2">
-                        <label class="text-xs text-slate-500">Points:</label>
-                        <input type="number" id="bq_pts_${idx}" value="${q.points}" min="1" max="100" class="w-16 px-2 py-1 rounded border border-slate-300 text-xs bg-white" />
-                        ${builderQuestions.length > 1 ? `<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 text-xs font-bold ml-2">Remove</button>` : ''}
-                      </div>
-                    </div>
-
-                    <input type="text" id="bq_prompt_${idx}" value="${(q.prompt || '').replace(/"/g, '&quot;')}"
-                      placeholder="Question prompt (supports LaTeX like $2x + 5 = 15$)..."
-                      class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
-
-                    ${q.type === "mcq" ? `
-                      <div class="grid sm:grid-cols-2 gap-2">
-                        ${[0,1,2,3].map(oIdx => `
-                          <input type="text" id="bq_opt_${idx}_${oIdx}" value="${((q.options && q.options[oIdx]) || '').replace(/"/g, '&quot;')}"
-                            placeholder="Choice ${oIdx + 1}" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
-                        `).join("")}
-                      </div>
-                      <div>
-                        <label class="text-xs font-semibold text-slate-600 mr-2">Correct Choice:</label>
-                        <select id="bq_corr_${idx}" class="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white">
-                          ${[0,1,2,3].map(oIdx => `<option value="${oIdx}" ${String(q.correctAnswer) === String(oIdx) ? 'selected' : ''}>Choice ${oIdx + 1}</option>`).join("")}
-                        </select>
-                      </div>
-                    ` : ''}
-
-                    ${q.type === "tf" ? `
-                      <div>
-                        <label class="text-xs font-semibold text-slate-600 mr-2">Correct Answer:</label>
-                        <select id="bq_corr_${idx}" class="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white">
-                          <option value="True" ${q.correctAnswer === 'True' ? 'selected' : ''}>True</option>
-                          <option value="False" ${q.correctAnswer === 'False' ? 'selected' : ''}>False</option>
-                        </select>
-                      </div>
-                    ` : ''}
-
-                    ${q.type === "fill" ? `
-                      <input type="text" id="bq_corr_${idx}" value="${(q.correctAnswer || '').replace(/"/g, '&quot;')}"
-                        placeholder="Reference answer (optional — flagged for your review)"
-                        class="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
-                    ` : ''}
-
-                    ${q.type === "open" ? `
-                      <p class="text-xs text-slate-500 italic">Open-ended responses are automatically flagged for your manual review and partial/full credit scoring.</p>
-                    ` : ''}
-                  </div>
-                `).join("")}
-              </div>
-
-              <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
-                ${editingAssignmentId ? 'Save Assignment Changes ✓' : 'Publish Assignment'}
-              </button>
-            </form>
-          ` : ''}
-
-          <!-- PARENT TAB 4: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS TABS & RESOURCES -->
+          <!-- PARENT TAB 3: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS TABS & RESOURCES -->
           ${parentTab === "schedule-hub" ? `
             <div class="space-y-8">
               <div class="grid lg:grid-cols-2 gap-6">
@@ -3520,13 +3672,13 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 5: GRADEBOOK, LESSON COMPLETION & VOLUNTEER HOURS -->
+          <!-- PARENT TAB 4: GRADEBOOK, LESSON COMPLETION & VOLUNTEER HOURS -->
           ${parentTab === "gradebook" ? `
             <div class="space-y-8">
               <div>
-                <div class="mb-4 flex items-center gap-2">
+                <div class="mb-4 flex flex-wrap items-center gap-2">
                   <span class="text-xs font-bold uppercase text-slate-500">Filter by Student:</span>
-                  ${["All", ...students.map(s => s.id)].map(id => {
+                  ${["All", ...allStudents.map(s => s.id)].map(id => {
                     const label = id === "All" ? "All Students" : getStudentById(id)?.name;
                     return `
                       <button onclick="parentStudentFilter='${id}'; render();"
@@ -3555,14 +3707,15 @@
                         </tr>
                       </thead>
                       <tbody class="divide-y divide-slate-100">
-                        ${students
+                        ${allStudents
                           .filter(stu => parentStudentFilter === "All" || stu.id === parentStudentFilter)
                           .flatMap(stu => (appState.lessons || [])
                             .filter(l => isLessonVisibleToStudent(l, stu.id))
                             .map(l => {
                               const completedAt = l.completedBy?.[stu.id];
+                              const isSandbox = stu.id === SANDBOX_STUDENT_ID;
                               return `
-                                <tr>
+                                <tr class="${isSandbox ? 'bg-amberwarm-50/40' : ''}">
                                   <td class="py-3 px-4 font-bold text-ink">${stu.name}</td>
                                   <td class="py-3 px-4 font-semibold text-slate-700">${l.subject}</td>
                                   <td class="py-3 px-4 font-medium text-ink">${l.title}</td>
@@ -3572,7 +3725,7 @@
                                       : `<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">Not Completed</span>`}
                                   </td>
                                   <td class="py-3 px-4 text-xs font-semibold text-slate-400">Ungraded</td>
-                                  <td class="py-3 px-4 text-right space-x-2">
+                                  <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
                                     ${completedAt ? `
                                       <button onclick="resetLessonCompletion('${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">↺ Reopen</button>
                                     ` : ''}
@@ -3604,7 +3757,7 @@
                         </tr>
                       </thead>
                       <tbody class="divide-y divide-slate-100">
-                        ${students
+                        ${allStudents
                           .filter(stu => parentStudentFilter === "All" || stu.id === parentStudentFilter)
                           .flatMap(stu => (appState.assignments || [])
                             .filter(a => isAssignmentVisibleToStudent(a, stu.id))
@@ -3616,9 +3769,10 @@
                                 ? Math.round((sub.earnedPoints / totalPts) * 100) + "%"
                                 : "—";
                               const violCount = sub?.violations?.length || 0;
+                              const isSandbox = stu.id === SANDBOX_STUDENT_ID;
 
                               return `
-                                <tr>
+                                <tr class="${isSandbox ? 'bg-amberwarm-50/40' : ''}">
                                   <td class="py-3.5 px-4 font-bold text-ink">${stu.name}</td>
                                   <td class="py-3.5 px-4 font-semibold text-slate-700">${a.subject}</td>
                                   <td class="py-3.5 px-4 font-medium text-ink">${a.title}</td>
@@ -3684,7 +3838,7 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 6: STUDENTS & GMAIL ACCESS -->
+          <!-- PARENT TAB 5: STUDENTS & GMAIL ACCESS -->
           ${parentTab === "students" ? `
             <div class="grid md:grid-cols-2 gap-6">
               <div class="space-y-4">
@@ -3693,7 +3847,7 @@
                   <p class="text-xs text-slate-500">Link each student's Gmail address so signing in with Google loads their personal dashboard automatically.</p>
 
                   <div class="space-y-3">
-                    ${students.map(stu => `
+                    ${realStudents.map(stu => `
                       <div class="p-4 rounded-xl bg-white border border-slate-200 space-y-3">
                         <div class="grid grid-cols-2 gap-2">
                           <div>
@@ -3710,7 +3864,7 @@
                           </div>
                         </div>
                         <div class="flex justify-between items-center pt-1">
-                          ${students.length > 1
+                          ${realStudents.length > 1
                             ? `<button type="button" onclick="removeStudent('${stu.id}')" class="text-xs text-red-500 hover:underline">Remove</button>`
                             : `<span></span>`}
                           <button type="button" onclick="updateStudentInfo('${stu.id}')"
@@ -3812,14 +3966,14 @@
               const rawAns = sub.answers[q.id] ?? "";
               let displayAns = rawAns;
               if (q.type === "mcq" && rawAns !== "") {
-                displayAns = q.options[Number(rawAns)] || rawAns;
+                displayAns = formatMathOption(q.options[Number(rawAns)] || rawAns);
               }
               const currentScore = sub.questionScores[q.id] ?? 0;
 
               return `
                 <div class="bg-white rounded-3xl p-6 border border-white shadow-sm">
                   <div class="flex justify-between items-start gap-4 mb-3">
-                    <p class="font-semibold text-ink">${idx + 1}. ${q.prompt}</p>
+                    <p class="font-semibold text-ink">${idx + 1}. ${formatMathOption(q.prompt)}</p>
                     <div class="flex items-center gap-1.5 shrink-0">
                       <input type="number" id="grade_q_${q.id}" value="${currentScore}" min="0" max="${q.points}" step="0.5"
                         class="w-16 px-2 py-1 rounded-lg border border-slate-300 text-sm font-bold text-right" />
@@ -3834,7 +3988,7 @@
 
                   ${q.correctAnswer && (q.type === 'mcq' || q.type === 'tf' || q.type === 'fill') ? `
                     <p class="text-xs text-emerald-700 mt-2 font-medium">
-                      Answer Key: ${q.type === 'mcq' ? q.options[Number(q.correctAnswer)] : q.correctAnswer}
+                      Answer Key: ${q.type === 'mcq' ? formatMathOption(q.options[Number(q.correctAnswer)]) : formatMathOption(q.correctAnswer)}
                     </p>
                   ` : ''}
                 </div>
@@ -3897,11 +4051,11 @@
           <div class="space-y-4">
             ${item.questions.map((q, idx) => {
               const ans = sub?.answers?.[q.id] ?? "";
-              const displayAns = q.type === "mcq" && ans !== "" ? q.options[Number(ans)] : ans;
+              const displayAns = q.type === "mcq" && ans !== "" ? formatMathOption(q.options[Number(ans)]) : ans;
               return `
                 <div class="border-b border-slate-200 pb-3 page-break-inside-avoid">
                   <div class="flex justify-between text-sm font-semibold mb-1">
-                    <span>${idx + 1}. ${q.prompt}</span>
+                    <span>${idx + 1}. ${formatMathOption(q.prompt)}</span>
                     <span>${sub?.questionScores?.[q.id] ?? 0} / ${q.points} pts</span>
                   </div>
                   <p class="text-sm text-slate-700 pl-4"><strong>Response:</strong> ${displayAns || '—'}</p>
