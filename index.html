@@ -237,6 +237,7 @@
 
     // Leave empty so zero personal emails appear in public code; Firebase Rules enforce access privately.
     const FAMILY_GOOGLE_ACCOUNTS = {};
+    const SANDBOX_STUDENT_ID = "__sandbox_tester__";
 
     const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.databaseURL);
     let db = null;
@@ -256,7 +257,7 @@
     }
 
     // =========================================================================
-    // 2. INITIAL STATE & SAMPLE 8TH GRADE CURRICULUM DATA (GENERIC PLACEHOLDERS)
+    // 2. INITIAL STATE & GENERIC DEFAULTS
     // =========================================================================
     const DEFAULT_STATE = {
       settings: {
@@ -324,7 +325,7 @@
     let authErrorText = "";
 
     let currentRole = "student";
-    let parentUnlockedSession = false; // Remembers parent unlock during current tab session so switching back & forth is effortless
+    let parentUnlockedSession = false;
     let authenticatedStudentId = appState.settings.students[0]?.id || "stu_1";
 
     // 8 Essential Daily Tabs for Student Portal
@@ -390,14 +391,18 @@
       if (whitelistKeys.length === 0 && !matchedStudentProfile) {
         currentRole = "parent";
         parentUnlockedSession = true;
-        authenticatedStudentId = appState.settings.students[0]?.id || "stu_1";
+        authenticatedStudentId = SANDBOX_STUDENT_ID;
         return true;
       }
 
       if (matchedHardcoded) {
         currentRole = matchedHardcoded.role || "student";
-        if (currentRole === "parent") parentUnlockedSession = true;
-        authenticatedStudentId = matchedHardcoded.studentId || appState.settings.students[0]?.id;
+        if (currentRole === "parent") {
+          parentUnlockedSession = true;
+          authenticatedStudentId = SANDBOX_STUDENT_ID;
+        } else {
+          authenticatedStudentId = matchedHardcoded.studentId || appState.settings.students[0]?.id;
+        }
         return true;
       }
 
@@ -568,15 +573,20 @@
 
     // Helper Getters
     function getStudentById(id) {
+      if (id === SANDBOX_STUDENT_ID) {
+        return { id: SANDBOX_STUDENT_ID, name: "Preview Student", gradeLevel: "8th Grade", email: "" };
+      }
       return (appState.settings.students || []).find(s => s.id === id) || appState.settings.students[0];
     }
     function getSubKey(studentId, assignmentId) {
       return `${studentId}_${assignmentId}`;
     }
     function isLessonVisibleToStudent(lesson, studentId) {
+      if (studentId === SANDBOX_STUDENT_ID) return true;
       return !lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId;
     }
     function isAssignmentVisibleToStudent(asg, studentId) {
+      if (studentId === SANDBOX_STUDENT_ID) return true;
       return !asg.studentId || asg.studentId === "ALL" || asg.studentId === studentId;
     }
     function isLessonCompletedBy(lesson, studentId) {
@@ -844,8 +854,16 @@
     }
 
     // =========================================================================
-    // 8. ROLE SWITCHING & NAVIGATION (INCLUDING 1-CLICK STUDENT PREVIEW)
+    // 8. ROLE SWITCHING, NAVIGATION & SANDBOX PREVIEW CONTROLS
     // =========================================================================
+    window.closeStudentDetailView = function() {
+      exitStrictSessionCleanup();
+      activeLessonId = null;
+      activeAssignmentId = null;
+      printableRecord = null;
+      render();
+    };
+
     window.openParentPinModal = function() {
       if (currentRole === "parent") return;
       if (parentUnlockedSession) {
@@ -888,12 +906,35 @@
     window.switchToStudentView = function() {
       exitStrictSessionCleanup();
       currentRole = "student";
+      // When parent previews Student Hub, isolate into Sandbox Tester so student's real account stays untouched
+      if (parentUnlockedSession) {
+        authenticatedStudentId = SANDBOX_STUDENT_ID;
+      }
       activeLessonId = null;
       activeAssignmentId = null;
       activeReviewKey = null;
       printableRecord = null;
       updateRoleButtons();
       render();
+    };
+
+    window.resetSandboxProgress = function() {
+      if (!confirm("Reset all test answers and lesson checkboxes in your Teacher Sandbox Preview?")) return;
+      (appState.lessons || []).forEach(l => {
+        if (l.completedBy) delete l.completedBy[SANDBOX_STUDENT_ID];
+        if (l.checkPassedBy) delete l.checkPassedBy[SANDBOX_STUDENT_ID];
+      });
+      if (appState.submissions) {
+        Object.keys(appState.submissions).forEach(k => {
+          if (k.startsWith(SANDBOX_STUDENT_ID + "_")) delete appState.submissions[k];
+        });
+      }
+      appState.readingLogs = (appState.readingLogs || []).filter(r => r.studentId !== SANDBOX_STUDENT_ID);
+      appState.activityLogs = (appState.activityLogs || []).filter(a => a.studentId !== SANDBOX_STUDENT_ID);
+      appState.portfolioShowcase = (appState.portfolioShowcase || []).filter(p => p.studentId !== SANDBOX_STUDENT_ID);
+      activeLessonId = null;
+      activeAssignmentId = null;
+      saveState("Sandbox preview reset!");
     };
 
     function updateRoleButtons() {
@@ -1135,7 +1176,7 @@
     };
 
     // =========================================================================
-    // 10. PARENT BUILDER, EDITORS, SCHEDULE, SYLLABUS TABS, CSV IMPORT & GRADING
+    // 10. PARENT BUILDER, EDITORS, REOPEN SUBMISSION, CSV IMPORT & GRADING
     // =========================================================================
     let builderQuestions = [
       { id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }
@@ -1302,6 +1343,23 @@
       builderQuestions = [{ id: "bq_" + Date.now(), type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
       parentTab = "overview";
       saveState(existing ? "Assignment updated!" : "Assignment published!");
+    };
+
+    window.reopenAssignmentSubmission = function(subKey) {
+      if (!confirm("Reopen this assignment for the student? This clears their submitted answers and score so they can complete it again.")) return;
+      if (appState.submissions && appState.submissions[subKey]) {
+        delete appState.submissions[subKey];
+        activeReviewKey = null;
+        saveState("Assignment reopened for student!");
+      }
+    };
+
+    window.resetLessonCompletion = function(lessonId, studentId) {
+      const les = (appState.lessons || []).find(l => l.id === lessonId);
+      if (!les) return;
+      if (les.completedBy) delete les.completedBy[studentId];
+      if (les.checkPassedBy) delete les.checkPassedBy[studentId];
+      saveState("Lesson marked incomplete!");
     };
 
     window.startEditScheduleBlock = function(id) {
@@ -1754,7 +1812,9 @@
 
       if ((authStatus === "authorized" || authStatus === "demo") && currentRole === "student") {
         const stu = getStudentById(authenticatedStudentId);
-        headerTitle.textContent = `${stu.name}'s Homeschool Hub`;
+        headerTitle.textContent = authenticatedStudentId === SANDBOX_STUDENT_ID
+          ? "Student View (Teacher Sandbox)"
+          : `${stu.name}'s Homeschool Hub`;
       } else {
         headerTitle.textContent = "Sunshine Homeschool Hub";
       }
@@ -1851,11 +1911,16 @@
 
       return `
         ${parentUnlockedSession ? `
-          <div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex items-center justify-between shadow-sm">
-            <span>👁 <strong>Student Preview Mode:</strong> You are viewing the hub exactly as ${student.name} sees it.</span>
-            <button onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white font-bold">
-              Return to Parent Hub →
-            </button>
+          <div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm">
+            <span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing interactions safely—Isabel's real account and grades are completely untouched.</span>
+            <div class="flex items-center gap-2">
+              <button onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold">
+                ↺ Reset Test Progress
+              </button>
+              <button onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white font-bold">
+                Return to Parent Hub →
+              </button>
+            </div>
           </div>
         ` : ''}
 
@@ -1873,13 +1938,6 @@
               </button>
             `).join("")}
           </nav>
-
-          ${(appState.settings.students || []).length > 1 ? `
-            <select onchange="authenticatedStudentId=this.value; render();"
-              class="text-xs font-bold text-slate-700 bg-white/85 px-3 py-1.5 rounded-xl border border-white shadow-sm">
-              ${appState.settings.students.map(s => `<option value="${s.id}" ${s.id === student.id ? 'selected' : ''}>Viewing: ${s.name}</option>`).join("")}
-            </select>
-          ` : ''}
         </div>
 
         ${studentTab === "home" ? renderTabHome(student, metrics) : ''}
@@ -2180,19 +2238,18 @@
       `;
     }
 
- // --- TAB 3: SUBJECTS / COURSES (CHRONOLOGICAL COURSE ROADMAP) ---
+    // --- TAB 3: SUBJECTS / COURSES (CHRONOLOGICAL COURSE ROADMAP) ---
     function renderTabSubjects(student, metrics) {
       const subjects = appState.settings.subjects || [];
       if (!subjects.includes(activeCourseSubject)) activeCourseSubject = subjects[0] || "";
       const details = appState.settings.subjectDetails?.[activeCourseSubject] || {};
 
-      // Combine lessons and assignments into one chronological stream sorted by date ascending
       const lessonItems = metrics.myLessons
         .filter(l => l.subject === activeCourseSubject)
         .map(l => ({
           kind: "lesson",
           sortDate: l.date || "9999-12-31",
-          priority: 0, // Lessons appear first on any shared date
+          priority: 0,
           data: l
         }));
 
@@ -2201,7 +2258,7 @@
         .map(a => ({
           kind: "assignment",
           sortDate: a.dueDate || "9999-12-31",
-          priority: 1, // Warm-ups & quizzes follow the lesson on that date
+          priority: 1,
           data: a
         }));
 
@@ -2209,7 +2266,6 @@
         const dateCmp = a.sortDate.localeCompare(b.sortDate);
         if (dateCmp !== 0) return dateCmp;
         if (a.priority !== b.priority) return a.priority - b.priority;
-        // Put Daily Warm-Ups before Quizzes/Tests if due on the exact same date
         const aIsWarmup = (a.data.title || "").toLowerCase().includes("warm-up") ? 0 : 1;
         const bIsWarmup = (b.data.title || "").toLowerCase().includes("warm-up") ? 0 : 1;
         return aIsWarmup - bIsWarmup;
@@ -2260,7 +2316,7 @@
 
               ${timeline.length === 0 ? `<p class="text-xs text-slate-400">No lessons or assignments posted in ${activeCourseSubject} yet.</p>` : `
                 <div class="space-y-3">
-                  ${timeline.map((item, idx) => {
+                  ${timeline.map(item => {
                     if (item.kind === "lesson") {
                       const les = item.data;
                       const done = isLessonCompletedBy(les, student.id);
@@ -2683,7 +2739,7 @@
       return `
         <div class="max-w-3xl mx-auto">
           <div class="flex items-center justify-between mb-6">
-            <button onclick="activeLessonId=null; render();" class="text-sm font-bold text-slate-700 hover:text-ink flex items-center gap-1 bg-white/80 px-3.5 py-2 rounded-xl">
+            <button onclick="closeStudentDetailView()" class="text-sm font-bold text-slate-700 hover:text-ink flex items-center gap-1 bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">
               ← Back to Hub
             </button>
             <button onclick="openPrintablePortfolio('lesson', '${les.id}', '${authenticatedStudentId}')" class="px-3.5 py-2 rounded-xl bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-sm">
@@ -2787,7 +2843,7 @@
               This assessment requires <strong>Full-Screen Focus Mode</strong>. Switching tabs, opening other windows, copying text, or exiting full-screen will automatically lock the test and require your Parent PIN to resume.
             </p>
             <div class="flex gap-3">
-              <button onclick="activeAssignmentId=null; exitStrictSessionCleanup(); render();"
+              <button onclick="closeStudentDetailView()"
                 class="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm">
                 Not Ready Yet
               </button>
@@ -2806,7 +2862,7 @@
         <div class="max-w-3xl mx-auto ${asg.strictMode && !isSubmitted ? 'strict-locked-content' : ''}">
           <div class="flex items-center justify-between mb-6">
             ${!asg.strictMode || isSubmitted ? `
-              <button onclick="activeAssignmentId=null; render();" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl">
+              <button onclick="closeStudentDetailView()" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">
                 ← Back to Hub
               </button>
             ` : `<span class="text-xs font-bold uppercase tracking-wider text-red-600 bg-white px-3.5 py-1.5 rounded-full shadow-sm">🔒 Focus Monitoring Active</span>`}
@@ -3401,7 +3457,6 @@
                     <button type="submit" class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold">Save Calendar Link</button>
                   </form>
 
-                  <!-- COURSE SYLLABUS & CURRENT UNIT WITH SUBJECT TABS & LIVE PRE-FILLED DATA -->
                   <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3.5">
                     <div class="flex items-center justify-between">
                       <h3 class="font-bold text-ink">📚 Course Syllabus &amp; Current Unit</h3>
@@ -3465,7 +3520,7 @@
             </div>
           ` : ''}
 
-          <!-- PARENT TAB 5: GRADEBOOK & VERIFY VOLUNTEER HOURS -->
+          <!-- PARENT TAB 5: GRADEBOOK, LESSON COMPLETION & VOLUNTEER HOURS -->
           ${parentTab === "gradebook" ? `
             <div class="space-y-8">
               <div>
@@ -3484,6 +3539,56 @@
                   }).join("")}
                 </div>
 
+                <!-- LESSON COMPLETION TRACKER (UNGRADED) -->
+                <h3 class="font-bold text-ink text-sm mb-3">📖 Class Lesson Completion Status (Ungraded)</h3>
+                <div class="rounded-2xl border border-slate-200 overflow-hidden mb-8">
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                          <th class="py-3 px-4">Student</th>
+                          <th class="py-3 px-4">Subject</th>
+                          <th class="py-3 px-4">Lesson Title</th>
+                          <th class="py-3 px-4">Status</th>
+                          <th class="py-3 px-4">Grade</th>
+                          <th class="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100">
+                        ${students
+                          .filter(stu => parentStudentFilter === "All" || stu.id === parentStudentFilter)
+                          .flatMap(stu => (appState.lessons || [])
+                            .filter(l => isLessonVisibleToStudent(l, stu.id))
+                            .map(l => {
+                              const completedAt = l.completedBy?.[stu.id];
+                              return `
+                                <tr>
+                                  <td class="py-3 px-4 font-bold text-ink">${stu.name}</td>
+                                  <td class="py-3 px-4 font-semibold text-slate-700">${l.subject}</td>
+                                  <td class="py-3 px-4 font-medium text-ink">${l.title}</td>
+                                  <td class="py-3 px-4">
+                                    ${completedAt
+                                      ? `<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">✓ Completed (${new Date(completedAt).toLocaleDateString()})</span>`
+                                      : `<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">Not Completed</span>`}
+                                  </td>
+                                  <td class="py-3 px-4 text-xs font-semibold text-slate-400">Ungraded</td>
+                                  <td class="py-3 px-4 text-right space-x-2">
+                                    ${completedAt ? `
+                                      <button onclick="resetLessonCompletion('${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">↺ Reopen</button>
+                                    ` : ''}
+                                    <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
+                                  </td>
+                                </tr>
+                              `;
+                            })
+                          ).join("")}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- GRADED ASSESSMENTS & HOMEWORK TABLE -->
+                <h3 class="font-bold text-ink text-sm mb-3">📝 Homework, Daily Warm-Ups &amp; Assessments</h3>
                 <div class="rounded-2xl border border-slate-200 overflow-hidden">
                   <div class="overflow-x-auto">
                     <table class="w-full text-left border-collapse text-sm">
@@ -3495,7 +3600,7 @@
                           <th class="py-3.5 px-4">Status</th>
                           <th class="py-3.5 px-4">Score</th>
                           <th class="py-3.5 px-4">Focus Log</th>
-                          <th class="py-3.5 px-4 text-right">Portfolio / Review</th>
+                          <th class="py-3.5 px-4 text-right">Portfolio / Review / Reopen</th>
                         </tr>
                       </thead>
                       <tbody class="divide-y divide-slate-100">
@@ -3534,7 +3639,10 @@
                                       ? (violCount > 0 ? `<span class="text-red-600 font-bold">⚠ ${violCount} alert(s)</span>` : `<span class="text-emerald-600">Clean</span>`)
                                       : `<span class="text-slate-400">Standard</span>`}
                                   </td>
-                                  <td class="py-3.5 px-4 text-right space-x-2">
+                                  <td class="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                                    ${sub ? `
+                                      <button onclick="reopenAssignmentSubmission('${subKey}')" title="Clear submission so student can retake" class="px-2.5 py-1.5 rounded-lg border border-amberwarm-400 bg-amberwarm-50 text-amberwarm-600 text-xs font-bold hover:bg-amberwarm-100">↺ Reopen</button>
+                                    ` : ''}
                                     ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
                                       <button onclick="activeReviewKey='${subKey}'; render();" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50">Review</button>
                                       <button onclick="openPrintablePortfolio('submission', '${a.id}', '${stu.id}')" class="px-3 py-1.5 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
@@ -3668,9 +3776,14 @@
 
       return `
         <div class="max-w-3xl mx-auto">
-          <button onclick="activeReviewKey=null; render();" class="text-sm font-bold text-slate-700 hover:text-ink mb-4 bg-white/80 px-3.5 py-2 rounded-xl">
-            ← Back to Parent Hub
-          </button>
+          <div class="flex items-center justify-between mb-4">
+            <button onclick="activeReviewKey=null; render();" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">
+              ← Back to Parent Hub
+            </button>
+            <button onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold hover:bg-amberwarm-400 hover:text-ink">
+              ↺ Reopen Assignment for Student
+            </button>
+          </div>
 
           <div class="bg-white rounded-3xl p-6 border border-white shadow-sm mb-6">
             <span class="text-xs font-bold uppercase text-tealhub-600">${stu?.name || 'Student'} • ${asg.subject} • ${asg.type}</span>
