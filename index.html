@@ -228,7 +228,7 @@
     // =========================================================================
     // 1. FIREBASE CONFIGURATION (PASTE YOUR FREE FIREBASE KEYS HERE)
     // =========================================================================
-      const firebaseConfig = {
+  const firebaseConfig = {
     apiKey: "AIzaSyDscZ7MgKhibd8NTCCm4syElUaTj9o3KTk",
     authDomain: "sunshine-homeschool.firebaseapp.com",
     databaseURL: "https://sunshine-homeschool-default-rtdb.firebaseio.com",
@@ -246,6 +246,7 @@
     let db = null;
     let dbRef = null;
     let auth = null;
+    let hasInitialCloudSync = !isFirebaseConfigured; // Prevents overwriting cloud data before initial snapshot loads
     const googleProvider = new GoogleAuthProvider();
 
     if (isFirebaseConfigured) {
@@ -260,7 +261,7 @@
     }
 
     // =========================================================================
-    // 2. INITIAL STATE & MULTI-STUDENT / MULTI-GRADE ARCHITECTURE
+    // 2. INITIAL STATE & PER-STUDENT CURRICULUM DEFAULTS
     // =========================================================================
     const DEFAULT_SUBJECTS = ["Pre-Algebra", "Language Arts 3 Advanced", "Comprehensive Science 3", "World History"];
 
@@ -336,20 +337,20 @@
 
     // 8 Essential Daily Tabs for Student Portal
     let studentTab = "home";
-    let activeCourseSubject = "";
+    let activeCourseSubject = getAllConfiguredSubjects()[0] || "Pre-Algebra";
     let assignmentFilterTab = "todo";
 
-    // Parent Hub Tabs (Default = "student-records" so student management & search are first)
-    let parentTab = "student-records";
-    let studentSearchQuery = "";
-    let showAddStudentDrawer = false;
-    let inspectedStudentId = appState.settings.students[0]?.id || "stu_1";
-    let studentProfileSubTab = "overview"; // "overview" | "submissions" | "lessons" | "logs" | "annual-export"
-
-    let parentSubjectTab = "";
+    // Parent Hub Tabs & Workspace States
+    let parentTab = "overview";
+    let parentSubjectTab = getAllConfiguredSubjects()[0] || "Pre-Algebra";
     let parentSubjectEditorMode = null; // null | "lesson" | "assignment"
-    let parentSyllabusSubject = "";
+    let parentSyllabusSubject = getAllConfiguredSubjects()[0] || "Pre-Algebra";
     let parentStudentFilter = "All";
+    let studentSearchQuery = "";
+
+    // Parent "Student Records" Profile Inspector State
+    let inspectedStudentId = appState.settings.students[0]?.id || "stu_1";
+    let studentProfileSubTab = "overview";
 
     let editingLessonId = null;
     let editingAssignmentId = null;
@@ -377,29 +378,8 @@
     };
 
     // =========================================================================
-    // 3. SUBJECT AGGREGATION & REALTIME SYNC HELPERS
+    // 3. TOAST NOTIFICATION & SAFE REALTIME SYNC HELPERS
     // =========================================================================
-    function getAllConfiguredSubjects() {
-      const setOfSubjects = new Set(appState.settings.subjects || []);
-      (appState.settings.students || []).forEach(stu => {
-        (stu.subjects || []).forEach(s => setOfSubjects.add(s));
-      });
-      (appState.lessons || []).forEach(l => { if (l.subject) setOfSubjects.add(l.subject); });
-      (appState.assignments || []).forEach(a => { if (a.subject) setOfSubjects.add(a.subject); });
-      if (setOfSubjects.size === 0) DEFAULT_SUBJECTS.forEach(s => setOfSubjects.add(s));
-      return Array.from(setOfSubjects);
-    }
-
-    function getSubjectsForStudent(student) {
-      if (!student || student.id === SANDBOX_STUDENT_ID) {
-        return getAllConfiguredSubjects();
-      }
-      if (Array.isArray(student.subjects) && student.subjects.length > 0) {
-        return student.subjects;
-      }
-      return getAllConfiguredSubjects();
-    }
-
     function showSavedToast(msg) {
       let toast = document.getElementById("cloud-save-toast");
       if (!toast) {
@@ -412,6 +392,36 @@
       toast.style.opacity = "1";
       clearTimeout(toast._timer);
       toast._timer = setTimeout(() => { toast.style.opacity = "0"; }, 3000);
+    }
+
+    function normalizeStudents(rawStudents) {
+      const list = rawStudents && rawStudents.length ? rawStudents : DEFAULT_STATE.settings.students;
+      return list.map(s => ({
+        ...s,
+        subjects: Array.isArray(s.subjects) && s.subjects.length
+          ? s.subjects
+          : [...(appState?.settings?.subjects || DEFAULT_SUBJECTS)]
+      }));
+    }
+
+    function getAllConfiguredSubjects() {
+      const set = new Set(appState?.settings?.subjects || DEFAULT_SUBJECTS);
+      (appState?.settings?.students || []).forEach(s => {
+        (s.subjects || []).forEach(sub => set.add(sub));
+      });
+      (appState?.lessons || []).forEach(l => { if (l.subject) set.add(l.subject); });
+      (appState?.assignments || []).forEach(a => { if (a.subject) set.add(a.subject); });
+      return Array.from(set);
+    }
+
+    function getStudentSubjects(student) {
+      if (!student || student.id === SANDBOX_STUDENT_ID) {
+        return getAllConfiguredSubjects();
+      }
+      if (Array.isArray(student.subjects) && student.subjects.length) {
+        return student.subjects;
+      }
+      return appState.settings.subjects || DEFAULT_SUBJECTS;
     }
 
     function resolveUserAccess(user) {
@@ -455,16 +465,14 @@
       if (!isFirebaseConfigured || !dbRef) return;
       onValue(dbRef, (snapshot) => {
         const remoteData = snapshot.val();
+        hasInitialCloudSync = true;
         if (remoteData) {
-          const mergedStudents = (remoteData.settings?.students || DEFAULT_STATE.settings.students).map(s => ({
-            ...s,
-            subjects: Array.isArray(s.subjects) && s.subjects.length > 0 ? s.subjects : [...DEFAULT_SUBJECTS]
-          }));
+          const normalizedStu = normalizeStudents(remoteData.settings?.students);
           appState = {
             settings: {
               ...DEFAULT_STATE.settings,
               ...(remoteData.settings || {}),
-              students: mergedStudents,
+              students: normalizedStu,
               announcements: remoteData.settings?.announcements || [],
               subjectDetails: { ...DEFAULT_STATE.settings.subjectDetails, ...(remoteData.settings?.subjectDetails || {}) }
             },
@@ -477,12 +485,12 @@
             activityLogs: remoteData.activityLogs || [],
             portfolioShowcase: remoteData.portfolioShowcase || []
           };
-          if (currentGoogleUser && authStatus === "loading") resolveUserAccess(currentGoogleUser);
+          if (currentGoogleUser) resolveUserAccess(currentGoogleUser);
           localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
           updateHeaderChrome();
           render();
         } else {
-          // Only write initial defaults if local state actually has content or database is genuinely new
+          // Only seed cloud database if remote is genuinely null AND we have local data
           set(dbRef, appState);
         }
       }, (error) => {
@@ -497,10 +505,11 @@
       onAuthStateChanged(auth, (user) => {
         if (user) {
           currentGoogleUser = user;
+          // Attach cloud listener FIRST so remote state loads before role resolution
+          attachRealtimeListener();
           const allowed = resolveUserAccess(user);
           if (allowed) {
             authStatus = "authorized";
-            attachRealtimeListener();
           } else {
             authStatus = "unauthorized";
             authErrorText = `The Gmail account (${user.email}) is not on the Sunshine Homeschool family list.`;
@@ -508,6 +517,7 @@
         } else {
           currentGoogleUser = null;
           parentUnlockedSession = false;
+          hasInitialCloudSync = false;
           authStatus = "signed_out";
         }
         updateHeaderChrome();
@@ -568,17 +578,13 @@
         const saved = localStorage.getItem("sunshine_homeschool_state_v5");
         if (saved) {
           const parsed = JSON.parse(saved);
-          const mergedStudents = (parsed.settings?.students || DEFAULT_STATE.settings.students).map(s => ({
-            ...s,
-            subjects: Array.isArray(s.subjects) && s.subjects.length > 0 ? s.subjects : [...DEFAULT_SUBJECTS]
-          }));
           return {
             ...structuredClone(DEFAULT_STATE),
             ...parsed,
             settings: {
               ...DEFAULT_STATE.settings,
               ...(parsed.settings || {}),
-              students: mergedStudents,
+              students: normalizeStudents(parsed.settings?.students),
               subjectDetails: { ...DEFAULT_STATE.settings.subjectDetails, ...(parsed.settings?.subjectDetails || {}) }
             },
             submissions: parsed.submissions || {},
@@ -608,7 +614,7 @@
       render();
       showSavedToast(toastMessage);
 
-      if (isFirebaseConfigured && dbRef && authStatus === "authorized") {
+      if (isFirebaseConfigured && dbRef && authStatus === "authorized" && hasInitialCloudSync) {
         set(dbRef, appState).catch(err => {
           console.error("Firebase write failed:", err);
           alert("Cloud sync error: " + err.message);
@@ -621,13 +627,13 @@
       const realStudents = appState.settings.students || [];
       return [
         ...realStudents,
-        { id: SANDBOX_STUDENT_ID, name: "Teacher Sandbox", gradeLevel: "Draft / Preview", email: "", subjects: getAllConfiguredSubjects() }
+        { id: SANDBOX_STUDENT_ID, name: "Teacher Sandbox", gradeLevel: "Draft & Preview", email: "", subjects: getAllConfiguredSubjects() }
       ];
     }
 
     function getStudentById(id) {
       if (id === SANDBOX_STUDENT_ID) {
-        return { id: SANDBOX_STUDENT_ID, name: "Teacher Sandbox", gradeLevel: "Draft / Preview", email: "", subjects: getAllConfiguredSubjects() };
+        return { id: SANDBOX_STUDENT_ID, name: "Teacher Sandbox", gradeLevel: "Draft & Preview", email: "", subjects: getAllConfiguredSubjects() };
       }
       return (appState.settings.students || []).find(s => s.id === id) || appState.settings.students[0];
     }
@@ -635,22 +641,16 @@
       return `${studentId}_${assignmentId}`;
     }
     function isLessonVisibleToStudent(lesson, studentId) {
-      // Sandbox sees ALL lessons (both sandbox drafts and live student lessons)
+      // Teacher Sandbox sees all lessons (drafts + assigned) for testing
       if (studentId === SANDBOX_STUDENT_ID) return true;
-      // Real students NEVER see items assigned solely to SANDBOX_STUDENT_ID
+      // Real students NEVER see items still assigned only to Teacher Sandbox
       if (lesson.studentId === SANDBOX_STUDENT_ID) return false;
-      const stu = getStudentById(studentId);
-      const stuSubjects = getSubjectsForStudent(stu);
-      const matchesSubject = !lesson.subject || stuSubjects.includes(lesson.subject);
-      return (!lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId) && matchesSubject;
+      return !lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId;
     }
     function isAssignmentVisibleToStudent(asg, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
       if (asg.studentId === SANDBOX_STUDENT_ID) return false;
-      const stu = getStudentById(studentId);
-      const stuSubjects = getSubjectsForStudent(stu);
-      const matchesSubject = !asg.subject || stuSubjects.includes(asg.subject);
-      return (!asg.studentId || asg.studentId === "ALL" || asg.studentId === studentId) && matchesSubject;
+      return !asg.studentId || asg.studentId === "ALL" || asg.studentId === studentId;
     }
     function isLessonCompletedBy(lesson, studentId) {
       return Boolean(lesson.completedBy && lesson.completedBy[studentId]);
@@ -940,7 +940,7 @@
     }
 
     // =========================================================================
-    // 8. ROLE SWITCHING, NAVIGATION, SEARCH, FILTERS & REVIEW CONTROLS
+    // 8. ROLE SWITCHING, NAVIGATION, FILTERS & REVIEW CONTROLS
     // =========================================================================
     window.closeStudentDetailView = function() {
       exitStrictSessionCleanup();
@@ -978,18 +978,11 @@
     window.updateStudentSearch = function(val) {
       studentSearchQuery = val;
       render();
-      setTimeout(() => {
-        const el = document.getElementById("student-search-input");
-        if (el) {
-          el.focus();
-          el.setSelectionRange(el.value.length, el.value.length);
-        }
-      }, 10);
-    };
-
-    window.toggleAddStudentDrawer = function() {
-      showAddStudentDrawer = !showAddStudentDrawer;
-      render();
+      const inp = document.getElementById("stu-search-box");
+      if (inp) {
+        inp.focus();
+        inp.setSelectionRange(val.length, val.length);
+      }
     };
 
     window.openParentPinModal = function() {
@@ -1063,16 +1056,16 @@
       render();
     };
 
-    window.promoteSandboxItemToStudents = function(kind, id) {
-      const targetStuId = appState.settings.students?.[0]?.id || "ALL";
+    window.assignSandboxDraftToStudent = function(kind, id, targetStudentId) {
       if (kind === "lesson") {
         const les = (appState.lessons || []).find(l => l.id === id);
-        if (les) les.studentId = targetStuId;
+        if (les) les.studentId = targetStudentId;
       } else {
         const asg = (appState.assignments || []).find(a => a.id === id);
-        if (asg) asg.studentId = targetStuId;
+        if (asg) asg.studentId = targetStudentId;
       }
-      saveState("Assigned to student!");
+      const targetName = targetStudentId === "ALL" ? "All Students" : (getStudentById(targetStudentId)?.name || "Student");
+      saveState(`Assigned to ${targetName}!`);
     };
 
     window.resetSandboxProgress = function() {
@@ -1713,22 +1706,16 @@
       const name = document.getElementById("new_stu_name").value.trim();
       const gradeLevel = document.getElementById("new_stu_grade").value.trim() || "8th Grade";
       const email = document.getElementById("new_stu_email").value.trim().toLowerCase();
-      const rawSubjs = document.getElementById("new_stu_subjects").value;
-      const stuSubjects = rawSubjs.split(",").map(s => s.trim()).filter(Boolean);
+      const rawSubj = document.getElementById("new_stu_subjects").value;
+      const subjects = rawSubj.split(",").map(s => s.trim()).filter(Boolean);
       if (!name) return;
-      const newId = "stu_" + Date.now();
       appState.settings.students.push({
-        id: newId,
+        id: "stu_" + Date.now(),
         name,
         gradeLevel,
         email,
-        subjects: stuSubjects.length ? stuSubjects : [...DEFAULT_SUBJECTS]
+        subjects: subjects.length ? subjects : [...DEFAULT_SUBJECTS]
       });
-      stuSubjects.forEach(s => {
-        if (!appState.settings.subjects.includes(s)) appState.settings.subjects.push(s);
-      });
-      inspectedStudentId = newId;
-      showAddStudentDrawer = false;
       saveState(`Added ${name}'s student profile!`);
     };
 
@@ -1738,17 +1725,13 @@
       const newName = document.getElementById(`edit_stu_name_${stuId}`).value.trim();
       const newGrade = document.getElementById(`edit_stu_grade_${stuId}`).value.trim();
       const newEmail = document.getElementById(`edit_stu_email_${stuId}`).value.trim().toLowerCase();
-      const newSubjsRaw = document.getElementById(`edit_stu_subjects_${stuId}`).value;
-      const parsedSubjs = newSubjsRaw.split(",").map(s => s.trim()).filter(Boolean);
+      const rawSubj = document.getElementById(`edit_stu_subjects_${stuId}`).value;
+      const parsedSubj = rawSubj.split(",").map(s => s.trim()).filter(Boolean);
+
       if (newName) stu.name = newName;
       if (newGrade) stu.gradeLevel = newGrade;
       stu.email = newEmail;
-      if (parsedSubjs.length > 0) {
-        stu.subjects = parsedSubjs;
-        parsedSubjs.forEach(s => {
-          if (!appState.settings.subjects.includes(s)) appState.settings.subjects.push(s);
-        });
-      }
+      if (parsedSubj.length) stu.subjects = parsedSubj;
       saveState(`Updated ${stu.name}'s profile & courses!`);
     };
 
@@ -1759,7 +1742,6 @@
       }
       if (!confirm("Remove this student profile?")) return;
       appState.settings.students = appState.settings.students.filter(s => s.id !== stuId);
-      inspectedStudentId = appState.settings.students[0]?.id || "stu_1";
       saveState("Student profile removed!");
     };
 
@@ -1769,7 +1751,7 @@
       appState.settings.readingGoalBooks = Number(document.getElementById("set_reading_goal").value) || 20;
       const newPin = document.getElementById("set_parent_pin").value.trim();
       if (newPin.length >= 4) appState.settings.parentPin = newPin;
-      saveState("School settings saved!");
+      saveState("Parent PIN & academic settings saved!");
     };
 
     // --- CSV CURRICULUM IMPORTER & TEMPLATE DOWNLOADER ---
@@ -1821,7 +1803,8 @@
           alert("CSV file appears empty.");
           return;
         }
-        const defaultStuId = appState.settings.students?.[0]?.id || "stu_1";
+        const defaultStu = appState.settings.students?.[0];
+        const defaultStuId = defaultStu?.id || "stu_1";
         const assignmentMap = {};
         let lessonsAdded = 0, schedulesAdded = 0, questionsAdded = 0;
 
@@ -1830,8 +1813,11 @@
           const recType = (recTypeRaw || "").toLowerCase();
           const subj = subjRaw || "General";
 
-          if (subj && subj !== "All Subjects" && !appState.settings.subjects.includes(subj)) {
-            appState.settings.subjects.push(subj);
+          if (subj && subj !== "All Subjects") {
+            if (!appState.settings.subjects.includes(subj)) appState.settings.subjects.push(subj);
+            if (defaultStu && Array.isArray(defaultStu.subjects) && !defaultStu.subjects.includes(subj)) {
+              defaultStu.subjects.push(subj);
+            }
           }
 
           if (recType === "schedule") {
@@ -2137,7 +2123,7 @@
       rootFolder.file("03_Extracurricular_and_Service_Hours.csv", actRows.map(r => r.join(",")).join("\n"));
 
       const classesFolder = rootFolder.folder("Individual_Classes");
-      getSubjectsForStudent(stu).forEach(subj => {
+      getStudentSubjects(stu).forEach(subj => {
         const safeSubj = subj.replace(/[^a-zA-Z0-9_-]/g, "_");
         classesFolder.file(`${safeSubj}_Full_Portfolio.html`, buildClassPortfolioHTML(stu, subj, metrics));
       });
@@ -2207,10 +2193,10 @@
     }
 
     function computeStudentMetrics(student) {
+      const stuSubjects = getStudentSubjects(student);
       const myLessons = (appState.lessons || []).filter(l => isLessonVisibleToStudent(l, student.id));
       const myAssignments = (appState.assignments || []).filter(a => isAssignmentVisibleToStudent(a, student.id));
       const subs = appState.submissions || {};
-      const stuSubjects = getSubjectsForStudent(student);
 
       const completedLessons = myLessons.filter(l => isLessonCompletedBy(l, student.id));
       const todoAssignments = myAssignments.filter(a => !subs[getSubKey(student.id, a.id)]);
@@ -2374,7 +2360,7 @@
       return `
         ${parentUnlockedSession ? `
           <div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm">
-            <span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing interactions safely—your student's real account stays untouched.</span>
+            <span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing drafts &amp; interactions safely—your student's real account stays untouched.</span>
             <div class="flex items-center gap-2">
               <button onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold">
                 ↺ Reset Test Progress
@@ -2421,8 +2407,7 @@
         { headerBg: "bg-sage-500", barBg: "bg-sage-500", icon: "📖" }
       ];
 
-      const stuSubjects = getSubjectsForStudent(student);
-      const activeSubjects = stuSubjects.slice(0, 4);
+      const activeSubjects = getStudentSubjects(student).slice(0, 4);
       const topThreeSubjects = activeSubjects.slice(0, 3);
       const fourthSubject = activeSubjects[3] || activeSubjects[0] || "General";
 
@@ -2643,7 +2628,6 @@
     // --- TAB 2: DAILY / WEEKLY SCHEDULE + GOOGLE CALENDAR SYNC ---
     function renderTabSchedule(student) {
       const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-      const stuSubjects = getSubjectsForStudent(student);
       const catBadge = {
         "Independent Study": "bg-sage-50 text-sage-700 border-sage-100",
         "Live Virtual Class": "bg-tealhub-500/10 text-tealhub-600 border-tealhub-500/20",
@@ -2673,7 +2657,7 @@
           <div class="grid md:grid-cols-5 gap-4">
             ${days.map(day => {
               const blocks = (appState.schedule || [])
-                .filter(b => b.day === day && (!b.subject || b.subject === "All Subjects" || stuSubjects.includes(b.subject)))
+                .filter(b => b.day === day)
                 .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
               return `
                 <div class="bg-white rounded-3xl p-4 border border-white shadow-sm flex flex-col">
@@ -2734,7 +2718,7 @@
 
     // --- TAB 3: SUBJECTS / COURSES (CHRONOLOGICAL COURSE ROADMAP) ---
     function renderTabSubjects(student, metrics) {
-      const subjects = getSubjectsForStudent(student);
+      const subjects = getStudentSubjects(student);
       if (!subjects.includes(activeCourseSubject)) activeCourseSubject = subjects[0] || "";
       const details = appState.settings.subjectDetails?.[activeCourseSubject] || {};
       const timeline = getChronologicalTimelineForSubject(activeCourseSubject, metrics.myLessons, metrics.myAssignments);
@@ -2742,7 +2726,7 @@
       return `
         <div class="grid lg:grid-cols-4 gap-6">
           <div class="space-y-2">
-            <p class="text-xs font-bold uppercase tracking-wider text-slate-600 px-1 mb-2">Enrolled Courses (${student.gradeLevel})</p>
+            <p class="text-xs font-bold uppercase tracking-wider text-slate-600 px-1 mb-2">Enrolled Courses</p>
             ${subjects.map(subj => {
               const stat = metrics.subjectStats[subj];
               const pct = stat && stat.total > 0 ? Math.round((stat.earned / stat.total) * 100) + "%" : "";
@@ -2954,7 +2938,6 @@
     // --- TAB 6: GRADES & PORTFOLIO SHOWCASE ---
     function renderTabPortfolio(student, metrics) {
       const myShowcase = (appState.portfolioShowcase || []).filter(p => p.studentId === student.id);
-      const stuSubjects = getSubjectsForStudent(student);
 
       return `
         <div class="space-y-8">
@@ -2987,7 +2970,7 @@
               <h4 class="font-display font-extrabold text-ink text-base">+ Add Best Work to Portfolio</h4>
               <p class="text-xs text-slate-500">Save favorite projects, Google Docs, art pieces, or photos for year-end evaluation.</p>
               <select id="port_subject" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs">
-                ${stuSubjects.map(s => `<option value="${s}">${s}</option>`).join("")}
+                ${getStudentSubjects(student).map(s => `<option value="${s}">${s}</option>`).join("")}
               </select>
               <input type="text" id="port_title" required placeholder="Project or Work Title" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
               <textarea id="port_desc" rows="3" required placeholder="What did you create or learn?" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"></textarea>
@@ -3467,167 +3450,182 @@
     }
 
     // -------------------------------------------------------------------------
-    // VIEW D: PARENT DASHBOARD (STUDENT-FIRST DEFAULT, ZERO-SCROLL TABS, SANDBOX-FIRST)
+    // VIEW D: PARENT DASHBOARD (WRAPPED TABS — ZERO HORIZONTAL SCROLLING)
     // -------------------------------------------------------------------------
     function renderParentDashboard() {
       const subs = appState.submissions || {};
       const pendingSubKeys = Object.keys(subs).filter(k => subs[k]?.status === "needs_review");
       const realStudents = appState.settings.students || [];
       const allStudents = getAllStudentsIncludingSandbox();
-      const subjects = getAllConfiguredSubjects();
-
-      if (!subjects.includes(parentSyllabusSubject)) parentSyllabusSubject = subjects[0] || "";
-      if (!subjects.includes(parentSubjectTab)) parentSubjectTab = subjects[0] || "";
-      if (!allStudents.some(s => s.id === inspectedStudentId)) inspectedStudentId = realStudents[0]?.id || SANDBOX_STUDENT_ID;
+      const allSubjects = getAllConfiguredSubjects();
+      if (!allSubjects.includes(parentSyllabusSubject)) parentSyllabusSubject = allSubjects[0] || "";
+      if (!allSubjects.includes(parentSubjectTab)) parentSubjectTab = allSubjects[0] || "";
+      if (!allStudents.some(s => s.id === inspectedStudentId)) inspectedStudentId = allStudents[0]?.id || "stu_1";
 
       const activeSylObj = appState.settings.subjectDetails?.[parentSyllabusSubject] || { currentUnit: "", syllabus: "" };
       const subjectRoadmap = getChronologicalTimelineForSubject(parentSubjectTab, appState.lessons || [], appState.assignments || []);
 
-      const filteredStudentsList = allStudents.filter(s => {
+      const filteredStudentsList = realStudents.filter(s => {
         if (!studentSearchQuery.trim()) return true;
         const q = studentSearchQuery.toLowerCase();
-        return s.name.toLowerCase().includes(q) || (s.gradeLevel || "").toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q);
+        return s.name.toLowerCase().includes(q) || s.gradeLevel.toLowerCase().includes(q) || (s.email || "").toLowerCase().includes(q);
       });
 
       return `
         <div class="bg-white/95 backdrop-blur rounded-3xl p-6 sm:p-8 border border-white shadow-sm">
-          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Manage student accounts &amp; courses, draft in Sandbox before assigning, grade work, and export Annual Reviews.</p>
+              <p class="text-sm text-slate-500">Draft &amp; preview in Sandbox, manage individual student courses, gradebook, and Annual Review folders.</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 hover:bg-amberwarm-500 text-ink text-xs font-extrabold shadow-sm">
                 👁 Preview Student View
               </button>
               <label class="px-3.5 py-2 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold cursor-pointer shadow-sm">
-                ⬆ Import CSV
+                ⬆ Import Curriculum (CSV)
                 <input type="file" accept=".csv" onchange="handleCurriculumCSVUpload(event)" class="hidden" />
               </label>
-              <button onclick="downloadCurriculumCSVTemplate()" class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
+              <button onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
                 📄 CSV Template
               </button>
-              <button onclick="exportJSONBackup()" class="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
-                ⬇ Backup JSON
+              <button onclick="exportJSONBackup()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
+                ⬇ Full Backup (JSON)
               </button>
             </div>
           </div>
 
-          <!-- ZERO-SCROLL WRAPPING NAVIGATION BAR -->
+          <!-- WRAPPED NAVIGATION BAR (NO HORIZONTAL SCROLLING REQUIRED) -->
           <div class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-3 mb-6">
             ${[
-              { id: "student-records", label: "Students & Records" },
+              { id: "overview", label: "Overview" },
+              { id: "student-records", label: "Student Records" },
               { id: "subjects-hub", label: "Subjects & Curriculum" },
               { id: "schedule-hub", label: "Schedule & Syllabi" },
               { id: "gradebook", label: "Gradebook", badge: pendingSubKeys.length },
-              { id: "announcements", label: "Announcements" },
-              { id: "settings", label: "PIN & Settings" }
+              { id: "students", label: "Students & PIN" }
             ].map(t => `
               <button onclick="setParentTab('${t.id}')"
                 class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-display font-bold transition flex items-center gap-1.5 ${
                   parentTab === t.id
                     ? 'bg-tealhub-500 text-white shadow-sm'
-                    : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/70 hover:text-ink'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-ink'
                 }">
                 ${t.label}
-                ${t.badge ? `<span class="px-1.5 py-0.2 text-[11px] rounded-full ${parentTab === t.id ? 'bg-white text-tealhub-600' : 'bg-amberwarm-400 text-ink'} font-extrabold">${t.badge}</span>` : ''}
+                ${t.badge ? `<span class="px-1.5 py-0.2 text-[11px] rounded-full ${parentTab === t.id ? 'bg-white text-tealhub-600' : 'bg-amberwarm-100 text-amberwarm-600'} font-extrabold">${t.badge}</span>` : ''}
               </button>
             `).join("")}
           </div>
 
-          <!-- PARENT TAB 1 (DEFAULT): STUDENTS & RECORDS AT A GLANCE -->
+          <!-- PARENT TAB 1: OVERVIEW & ANNOUNCEMENTS -->
+          ${parentTab === "overview" ? `
+            ${pendingSubKeys.length > 0 ? `
+              <div class="mb-8 p-5 rounded-2xl bg-amberwarm-50 border border-amberwarm-100">
+                <h3 class="font-bold text-amberwarm-600 text-xs uppercase tracking-wider mb-3">Action Needed: Written Work Awaiting Grading</h3>
+                <div class="space-y-2">
+                  ${pendingSubKeys.map(subKey => {
+                    const sub = subs[subKey];
+                    const asg = (appState.assignments || []).find(a => a.id === sub.assignmentId);
+                    const stu = getStudentById(sub.studentId);
+                    if (!asg) return "";
+                    return `
+                      <div class="bg-white p-4 rounded-xl border border-amberwarm-100 flex items-center justify-between">
+                        <div>
+                          <span class="text-xs font-bold text-tealhub-600">${stu?.name || 'Student'} • ${asg.subject}</span>
+                          <p class="font-bold text-ink">${asg.title}</p>
+                          ${sub.violations?.length ? `<p class="text-xs text-red-600 font-semibold mt-0.5">⚠ ${sub.violations.length} Focus Alert(s): ${sub.violations[0]}</p>` : ''}
+                        </div>
+                        <button onclick="openSubmissionReview('${subKey}')"
+                          class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold hover:opacity-90">
+                          Review &amp; Grade →
+                        </button>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="bg-slate-50/80 rounded-2xl p-5 border border-slate-200/80 mb-6">
+              <h3 class="font-bold text-ink text-sm mb-3">📣 Post Student Dashboard Announcement</h3>
+              <form onsubmit="addAnnouncement(event)" class="grid sm:grid-cols-4 gap-3">
+                <input type="text" id="ann_title" required placeholder="Headline (e.g., Field Trip Friday)" class="px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                <input type="text" id="ann_body" required placeholder="Message shown on student Home tab..." class="sm:col-span-2 px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                <button type="submit" class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold">Post Announcement</button>
+              </form>
+              ${(appState.settings.announcements || []).length > 0 ? `
+                <div class="mt-4 space-y-2">
+                  ${appState.settings.announcements.map(a => `
+                    <div class="flex items-center justify-between text-xs bg-white px-3.5 py-2 rounded-xl border border-slate-200/60">
+                      <span><strong>${a.title}:</strong> ${a.body}</span>
+                      <button onclick="deleteAnnouncement('${a.id}')" class="text-red-500 font-bold ml-3">✕</button>
+                    </div>
+                  `).join("")}
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              ${allSubjects.map(subj => {
+                const lCount = (appState.lessons || []).filter(l => l.subject === subj).length;
+                const aCount = (appState.assignments || []).filter(a => a.subject === subj).length;
+                return `
+                  <div onclick="selectParentSubjectTab('${subj}'); parentTab='subjects-hub'; render();"
+                    class="p-5 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-white hover:shadow-sm cursor-pointer transition space-y-2">
+                    <span class="text-xs font-bold uppercase text-tealhub-600">Course Workspace</span>
+                    <h4 class="font-display font-extrabold text-base text-ink">${subj}</h4>
+                    <p class="text-xs text-slate-600">${lCount} Lesson(s) • ${aCount} Assignment(s)</p>
+                    <p class="text-xs font-bold text-tealhub-600 pt-1">Open Subject Roadmap →</p>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : ''}
+
+          <!-- PARENT TAB 2: STUDENT RECORDS AT A GLANCE & ANNUAL REVIEW EXPORT -->
           ${parentTab === "student-records" ? (() => {
             const stu = getStudentById(inspectedStudentId);
-            const isSandbox = stu.id === SANDBOX_STUDENT_ID;
             const metrics = computeStudentMetrics(stu);
             const stuBooks = (appState.readingLogs || []).filter(r => r.studentId === stu.id);
             const stuActs = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
             const totalActHours = stuActs.reduce((s, a) => s + Number(a.hours || 0), 0);
-            const stuSubjects = getSubjectsForStudent(stu);
+            const stuCourses = getStudentSubjects(stu);
 
             return `
               <div class="space-y-6">
-                <!-- SEARCH BAR + ADD STUDENT ACTION -->
-                <div class="bg-slate-50/90 p-5 rounded-2xl border border-slate-200 space-y-4">
-                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div class="relative flex-1 max-w-md">
-                      <input type="text" id="student-search-input" value="${studentSearchQuery.replace(/"/g, '&quot;')}"
-                        oninput="updateStudentSearch(this.value)"
-                        placeholder="🔍 Search students by name, grade, or Gmail..."
-                        class="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs sm:text-sm bg-white focus:ring-2 focus:ring-tealhub-500 outline-none" />
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                      <button onclick="toggleAddStudentDrawer()"
-                        class="px-4 py-2.5 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-extrabold shadow-sm">
-                        ${showAddStudentDrawer ? '✕ Close Form' : '+ Add Student Account'}
-                      </button>
-                      <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')"
-                        class="px-4 py-2.5 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-extrabold shadow-sm">
-                        📦 Annual Review (.zip)
-                      </button>
-                    </div>
-                  </div>
-
-                  <!-- COLLAPSIBLE ADD STUDENT FORM -->
-                  ${showAddStudentDrawer ? `
-                    <form onsubmit="addNewStudent(event)" class="p-5 rounded-2xl bg-white border border-tealhub-500/30 shadow-sm space-y-3">
-                      <h4 class="font-display font-extrabold text-ink text-sm">+ Create New Student Account &amp; Grade-Level Course List</h4>
-                      <div class="grid sm:grid-cols-3 gap-3">
-                        <div>
-                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">First Name</label>
-                          <input type="text" id="new_stu_name" required placeholder="e.g. Leo" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
-                        </div>
-                        <div>
-                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Grade Level</label>
-                          <input type="text" id="new_stu_grade" required placeholder="e.g. 5th Grade" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
-                        </div>
-                        <div>
-                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Student Gmail Address</label>
-                          <input type="email" id="new_stu_email" placeholder="student@gmail.com" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
-                        </div>
-                        <div class="sm:col-span-3">
-                          <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Enrolled Courses for This Student (Comma-Separated)</label>
-                          <input type="text" id="new_stu_subjects" value="Math, Reading & Writing, Science, Social Studies"
-                            placeholder="e.g. 5th Grade Math, Language Arts 5, Earth Science, U.S. History"
-                            class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
-                        </div>
-                      </div>
-                      <button type="submit" class="px-5 py-2.5 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold">
-                        Create Student Account ✓
-                      </button>
-                    </form>
-                  ` : ''}
-
-                  <!-- STUDENT SELECTOR PILLS -->
-                  <div class="flex flex-wrap items-center gap-2 pt-1">
-                    ${filteredStudentsList.map(s => `
+                <div class="bg-slate-50/80 p-5 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold uppercase text-slate-500 mr-1">Select Student:</span>
+                    ${allStudents.map(s => `
                       <button onclick="selectInspectedStudent('${s.id}')"
-                        class="px-4 py-2 rounded-xl text-xs font-extrabold transition flex items-center gap-2 ${
+                        class="px-4 py-2 rounded-xl text-xs font-extrabold transition ${
                           inspectedStudentId === s.id
-                            ? 'bg-ink text-white shadow-sm'
+                            ? 'bg-tealhub-500 text-white shadow-sm'
                             : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
                         }">
-                        <span>${s.id === SANDBOX_STUDENT_ID ? '🧪' : '🎓'} ${s.name}</span>
-                        <span class="text-[10px] opacity-75">(${s.gradeLevel})</span>
+                        ${s.name} (${s.gradeLevel})
                       </button>
                     `).join("")}
                   </div>
+
+                  <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')"
+                    class="px-4 py-2.5 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-extrabold shadow-sm flex items-center gap-2 shrink-0">
+                    📦 Download Annual Review Folder (.zip)
+                  </button>
                 </div>
 
-                <!-- STUDENT SUB-TABS -->
                 <div class="flex flex-wrap gap-2">
                   ${[
                     { id: "overview", label: "📊 At-a-Glance & Grades" },
                     { id: "submissions", label: `📝 Submitted Work (${metrics.completedAssignments.length + metrics.inProgressAssignments.length})` },
                     { id: "lessons", label: `📖 Lessons (${metrics.completedLessons.length}/${metrics.myLessons.length})` },
                     { id: "logs", label: `📚 Reading & Hours (${stuBooks.length} books, ${totalActHours.toFixed(1)} hrs)` },
-                    { id: "annual-export", label: "🗂️ Annual Review Exports" },
-                    ...(!isSandbox ? [{ id: "profile-edit", label: "✏️ Profile & Courses" }] : [])
+                    { id: "annual-export", label: "🗂️ Annual Review & Class Exports" }
                   ].map(st => `
                     <button onclick="setStudentProfileSubTab('${st.id}')"
                       class="px-3.5 py-2 rounded-xl text-xs font-bold transition ${
                         studentProfileSubTab === st.id
-                          ? 'bg-tealhub-500 text-white shadow-sm'
+                          ? 'bg-ink text-white shadow-sm'
                           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                       }">
                       ${st.label}
@@ -3635,7 +3633,6 @@
                   `).join("")}
                 </div>
 
-                <!-- SUB-TAB A: AT-A-GLANCE & GRADES -->
                 ${studentProfileSubTab === "overview" ? `
                   <div class="space-y-6">
                     <div class="grid sm:grid-cols-4 gap-4">
@@ -3662,7 +3659,7 @@
                     </div>
 
                     <div class="grid sm:grid-cols-2 gap-4">
-                      ${stuSubjects.map(subj => {
+                      ${stuCourses.map(subj => {
                         const st = metrics.subjectStats[subj] || { earned: 0, total: 0, count: 0 };
                         const avg = st.total > 0 ? Math.round((st.earned / st.total) * 100) : null;
                         const subjLesDone = metrics.completedLessons.filter(l => l.subject === subj).length;
@@ -3684,7 +3681,1105 @@
                   </div>
                 ` : ''}
 
-                <!-- SUB-TAB B: SUBMITTED & GRADED WORK -->
                 ${studentProfileSubTab === "submissions" ? `
                   <div class="space-y-3">
-                    ${metrics
+                    ${metrics.myAssignments.map(a => {
+                      const subKey = getSubKey(stu.id, a.id);
+                      const sub = subs[subKey];
+                      const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+                      const violCount = sub?.violations?.length || 0;
+                      return `
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                              <span class="text-xs font-bold uppercase text-tealhub-600">${a.subject}</span>
+                              <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${
+                                !sub ? 'bg-slate-100 text-slate-500' :
+                                sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' :
+                                sub.status === 'needs_review' ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-blue-50 text-blue-700'
+                              }">${!sub ? 'Not Started' : sub.status.replace('_', ' ')}</span>
+                              ${violCount > 0 ? `<span class="text-xs font-bold text-red-600">⚠ ${violCount} Focus Alert: ${sub.violations[0]}</span>` : ''}
+                            </div>
+                            <p class="font-bold text-sm text-ink">${a.title}</p>
+                            <p class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'} ${sub ? `• Score: ${sub.earnedPoints}/${totalPts} pts` : ''}</p>
+                          </div>
+                          <div class="flex items-center gap-2 shrink-0">
+                            ${sub ? `<button onclick="reopenAssignmentSubmission('${subKey}')" class="px-2.5 py-1.5 rounded-lg border border-amberwarm-400 bg-amberwarm-50 text-amberwarm-600 text-xs font-bold">↺ Reopen</button>` : ''}
+                            ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
+                              <button onclick="openSubmissionReview('${subKey}')" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50">Review</button>
+                              <button onclick="openPrintablePortfolio('submission', '${a.id}', '${stu.id}')" class="px-3 py-1.5 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
+                            ` : ''}
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : ''}
+
+                ${studentProfileSubTab === "lessons" ? `
+                  <div class="space-y-2.5">
+                    ${metrics.myLessons.map(l => {
+                      const doneAt = l.completedBy?.[stu.id];
+                      return `
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-3">
+                          <div>
+                            <span class="text-xs font-bold text-tealhub-600">${l.subject} • ${l.date || ''}</span>
+                            <p class="font-bold text-sm text-ink">${l.title}</p>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <span class="px-2.5 py-1 rounded-full text-xs font-bold ${doneAt ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
+                              ${doneAt ? `✓ Completed ${new Date(doneAt).toLocaleDateString()}` : 'Not Completed'}
+                            </span>
+                            ${doneAt ? `<button onclick="resetLessonCompletion('${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-bold">↺ Reopen</button>` : ''}
+                          </div>
+                        </div>
+                      `;
+                    }).join("")}
+                  </div>
+                ` : ''}
+
+                ${studentProfileSubTab === "logs" ? `
+                  <div class="grid md:grid-cols-2 gap-6">
+                    <div class="space-y-3">
+                      <h4 class="font-bold text-ink text-sm">📚 Books Read (${stuBooks.length})</h4>
+                      ${stuBooks.length === 0 ? `<p class="text-xs text-slate-400 italic">No books logged yet.</p>` : ''}
+                      ${stuBooks.map(b => `
+                        <div class="p-3.5 rounded-xl border border-slate-200 bg-white text-xs">
+                          <p class="font-bold text-sm text-ink">${b.title} <span class="font-normal text-slate-500">by ${b.author}</span></p>
+                          <p class="text-slate-600 mt-1">"${b.reflection}"</p>
+                        </div>
+                      `).join("")}
+                    </div>
+                    <div class="space-y-3">
+                      <h4 class="font-bold text-ink text-sm">🏅 Extracurricular &amp; Service Hours (${totalActHours.toFixed(1)} hrs)</h4>
+                      ${stuActs.length === 0 ? `<p class="text-xs text-slate-400 italic">No activity hours logged yet.</p>` : ''}
+                      ${stuActs.map(a => `
+                        <div class="p-3.5 rounded-xl border border-slate-200 bg-white text-xs flex justify-between items-center">
+                          <div>
+                            <p class="font-bold text-ink">${a.organization} (${a.hours} hrs)</p>
+                            <p class="text-slate-600">${a.description}</p>
+                          </div>
+                          <button onclick="toggleVerifyActivity('${a.id}')" class="px-2.5 py-1 rounded-lg font-bold ${a.verifiedByParent ? 'bg-emerald-100 text-emerald-800' : 'bg-ink text-white'}">
+                            ${a.verifiedByParent ? '✓ Verified' : 'Verify'}
+                          </button>
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                ` : ''}
+
+                ${studentProfileSubTab === "annual-export" ? `
+                  <div class="space-y-6">
+                    <div class="p-6 rounded-2xl bg-sage-50 border border-sage-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <h4 class="font-display font-extrabold text-lg text-ink">📦 Complete Annual Review Folder (.zip) for ${stu.name}</h4>
+                        <p class="text-xs text-slate-600 mt-1 max-w-xl">
+                          Downloads one organized ZIP folder containing: <strong>00_MASTER_ANNUAL_REVIEW_PORTFOLIO.html</strong> (printable master evaluation summary with signature lines), <strong>01_Master_Gradebook_Summary.csv</strong>, <strong>02_Reading_Log.csv</strong>, <strong>03_Extracurricular_Hours.csv</strong>, plus a subfolder of <strong>individual class portfolio files</strong>.
+                        </p>
+                      </div>
+                      <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')"
+                        class="px-5 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-extrabold shadow-sm shrink-0">
+                        ⬇ Download Organized Folder (.zip)
+                      </button>
+                    </div>
+
+                    <div>
+                      <h4 class="font-bold text-ink text-sm mb-3">Individual Class &amp; Log Printables (Save as PDF)</h4>
+                      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        ${stuCourses.map(subj => `
+                          <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-2">
+                            <div>
+                              <span class="text-[10px] font-bold uppercase text-tealhub-600">Subject File</span>
+                              <p class="font-bold text-sm text-ink">${subj}</p>
+                            </div>
+                            <button onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();"
+                              class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
+                              🖨 Open / PDF
+                            </button>
+                          </div>
+                        `).join("")}
+
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-2">
+                          <div>
+                            <span class="text-[10px] font-bold uppercase text-terracotta-500">Annual Log</span>
+                            <p class="font-bold text-sm text-ink">Reading Log</p>
+                          </div>
+                          <button onclick="openPrintablePortfolio('reading', 'all', '${stu.id}')" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
+                            🖨 Open / PDF
+                          </button>
+                        </div>
+
+                        <div class="p-4 rounded-2xl border border-slate-200 bg-white flex items-center justify-between gap-2">
+                          <div>
+                            <span class="text-[10px] font-bold uppercase text-terracotta-500">Annual Log</span>
+                            <p class="font-bold text-sm text-ink">Activity &amp; Service Hours</p>
+                          </div>
+                          <button onclick="openPrintablePortfolio('activities', 'all', '${stu.id}')" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
+                            🖨 Open / PDF
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          })() : ''}
+
+          <!-- PARENT TAB 3: UNIFIED SUBJECTS & CURRICULUM WORKSPACE -->
+          ${parentTab === "subjects-hub" ? `
+            <div class="grid lg:grid-cols-4 gap-6">
+              <div class="space-y-2">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500 px-1 mb-2">Select Subject</p>
+                ${allSubjects.map(subj => {
+                  const totalItems = (appState.lessons || []).filter(l => l.subject === subj).length +
+                                     (appState.assignments || []).filter(a => a.subject === subj).length;
+                  return `
+                    <button onclick="selectParentSubjectTab('${subj}')"
+                      class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm transition flex items-center justify-between ${
+                        parentSubjectTab === subj
+                          ? 'bg-tealhub-500 text-white shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border border-slate-200/70 hover:bg-slate-100'
+                      }">
+                      <span>${subj}</span>
+                      <span class="text-xs px-2 py-0.5 rounded-full ${parentSubjectTab === subj ? 'bg-white/20 text-white' : 'bg-white text-slate-600'}">${totalItems}</span>
+                    </button>
+                  `;
+                }).join("")}
+              </div>
+
+              <div class="lg:col-span-3 space-y-6">
+                <div class="flex flex-wrap items-center justify-between gap-3 bg-slate-50/80 p-5 rounded-2xl border border-slate-200/80">
+                  <div>
+                    <span class="text-xs font-bold uppercase text-tealhub-600">Subject Curriculum Manager</span>
+                    <h3 class="text-xl font-display font-extrabold text-ink">${parentSubjectTab}</h3>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button onclick="openNewLessonInSubject('${parentSubjectTab}')"
+                      class="px-4 py-2 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold shadow-sm">
+                      + New Lesson
+                    </button>
+                    <button onclick="openNewAssignmentInSubject('${parentSubjectTab}')"
+                      class="px-4 py-2 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold shadow-sm">
+                      + New Homework / Quiz
+                    </button>
+                  </div>
+                </div>
+
+                <!-- INLINE LESSON CREATOR / EDITOR (DEFAULTS TO TEACHER SANDBOX FOR SAFE PREVIEWING) -->
+                ${parentSubjectEditorMode === "lesson" ? `
+                  <form onsubmit="publishNewLesson(event)" class="bg-slate-50/70 p-6 rounded-2xl border border-slate-200 space-y-5">
+                    <div class="flex items-center justify-between">
+                      <h4 class="text-lg font-display font-extrabold text-ink">${editingLessonId ? 'Edit Class Lesson' : `New ${parentSubjectTab} Lesson`}</h4>
+                      <button type="button" onclick="parentSubjectEditorMode=null; editingLessonId=null; render();" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
+                    </div>
+                    <div class="grid sm:grid-cols-3 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To Student</label>
+                        <select id="les_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          <option value="${SANDBOX_STUDENT_ID}" selected>🧪 Teacher Sandbox (Draft &amp; Preview Only)</option>
+                          ${realStudents.map(s => `<option value="${s.id}">${s.name} (${s.gradeLevel})</option>`).join("")}
+                          <option value="ALL">All Students</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
+                        <select id="les_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          ${allSubjects.map(s => `<option value="${s}" ${s === parentSubjectTab ? 'selected' : ''}>${s}</option>`).join("")}
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Date</label>
+                        <input type="date" id="les_date" value="${new Date().toISOString().slice(0,10)}"
+                          class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Title</label>
+                      <input type="text" id="les_title" required placeholder="e.g., Pythagorean Theorem Applications"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Lesson Notes (Supports Markdown &amp; LaTeX Math: $x^2 + y^2 = z^2$)</label>
+                      <textarea id="les_content" rows="7" required placeholder="Write lesson notes here. Use ### for headings, **bold** for key terms, and $...$ or $$...$$ for math/science formulas."
+                        class="w-full px-4 py-3 rounded-xl border border-slate-300 text-sm font-mono bg-white"></textarea>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">YouTube Video URL (Optional)</label>
+                        <input type="url" id="les_youtube" placeholder="https://www.youtube.com/watch?v=..."
+                          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Study Guide / Google Doc Link (Optional)</label>
+                        <input type="url" id="les_link" placeholder="https://docs.google.com/..."
+                          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Reference Image URL (Optional)</label>
+                      <input type="url" id="les_image" placeholder="https://... (diagram or chart URL)"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                    </div>
+
+                    <div class="p-5 rounded-2xl bg-white border border-slate-200 space-y-3">
+                      <label class="flex items-center gap-2 font-bold text-sm text-ink cursor-pointer">
+                        <input type="checkbox" id="les_check_enabled" checked />
+                        Include "Check for Understanding" Mini-Question at bottom of lesson
+                      </label>
+                      <input type="text" id="les_check_prompt" placeholder="Quick check question prompt..."
+                        class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                      <div class="grid sm:grid-cols-2 gap-2">
+                        <input type="text" id="les_check_opt0" placeholder="Option A" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                        <input type="text" id="les_check_opt1" placeholder="Option B" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                        <input type="text" id="les_check_opt2" placeholder="Option C" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                        <input type="text" id="les_check_opt3" placeholder="Option D" class="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label class="text-xs font-semibold text-slate-600 mr-2">Correct Option:</label>
+                        <select id="les_check_correct" class="px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white">
+                          <option value="0">Option A</option>
+                          <option value="1">Option B</option>
+                          <option value="2">Option C</option>
+                          <option value="3">Option D</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
+                      ${editingLessonId ? 'Save Lesson Changes ✓' : 'Save Lesson ✓'}
+                    </button>
+                  </form>
+                ` : ''}
+
+                <!-- INLINE ASSIGNMENT / QUIZ CREATOR / EDITOR (DEFAULTS TO TEACHER SANDBOX) -->
+                ${parentSubjectEditorMode === "assignment" ? `
+                  <form onsubmit="publishNewAssignment(event)" class="bg-slate-50/70 p-6 rounded-2xl border border-slate-200 space-y-6">
+                    <div class="flex items-center justify-between">
+                      <h4 class="text-lg font-display font-extrabold text-ink">${editingAssignmentId ? 'Edit Homework or Assessment' : `New ${parentSubjectTab} Homework / Quiz`}</h4>
+                      <button type="button" onclick="parentSubjectEditorMode=null; editingAssignmentId=null; render();" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
+                    </div>
+
+                    <div class="grid sm:grid-cols-4 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assign To</label>
+                        <select id="asg_student" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          <option value="${SANDBOX_STUDENT_ID}" selected>🧪 Teacher Sandbox (Draft &amp; Preview Only)</option>
+                          ${realStudents.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}
+                          <option value="ALL">All Students</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Subject</label>
+                        <select id="asg_subject" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          ${allSubjects.map(s => `<option value="${s}" ${s === parentSubjectTab ? 'selected' : ''}>${s}</option>`).join("")}
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Type</label>
+                        <select id="asg_type" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          <option value="Homework">Homework</option>
+                          <option value="Quiz">Quiz</option>
+                          <option value="Test">Test</option>
+                          <option value="Project">Project</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Due Date</label>
+                        <input type="date" id="asg_due" value="${new Date().toISOString().slice(0,10)}"
+                          class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Assignment Title</label>
+                        <input type="text" id="asg_title" required placeholder="e.g., Chapter 4 Algebra Quiz"
+                          class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Unlock After Lesson (Optional)</label>
+                        <select id="asg_linked_lesson" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white">
+                          <option value="">Available Immediately</option>
+                          ${(appState.lessons || []).map(l => `<option value="${l.id}">${l.subject}: ${l.title}</option>`).join("")}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-4">
+                      <div class="p-4 rounded-2xl bg-red-50/70 border border-red-100 flex items-start gap-3">
+                        <input type="checkbox" id="asg_strict" class="mt-1 w-4 h-4 accent-red-600" />
+                        <div>
+                          <label for="asg_strict" class="font-bold text-xs text-red-900 cursor-pointer">
+                            🔒 Enable Strict Test Mode (Anti-AI Lock)
+                          </label>
+                          <p class="text-[11px] text-red-700 mt-0.5">
+                            Requires Full-Screen, blocks copy/paste, and locks with Parent PIN on tab switch.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div class="p-4 rounded-2xl bg-sage-50 border border-sage-100 flex items-start gap-3">
+                        <input type="checkbox" id="asg_allow_link" checked class="mt-1 w-4 h-4 accent-sage-600" />
+                        <div>
+                          <label for="asg_allow_link" class="font-bold text-xs text-sage-700 cursor-pointer">
+                            📎 Allow Google Drive / Docs Link
+                          </label>
+                          <p class="text-[11px] text-slate-600 mt-0.5">
+                            Lets the student paste a Google Drive, Docs, Slides, or photo URL when turning in work.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="space-y-4">
+                      <div class="flex items-center justify-between">
+                        <h4 class="font-bold text-ink">Questions (${builderQuestions.length})</h4>
+                        <div class="flex flex-wrap gap-1.5">
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ Multiple Choice</button>
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ True/False</button>
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ Fill-in-Blank</button>
+                          <button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-xs font-bold">+ Open-Ended</button>
+                        </div>
+                      </div>
+
+                      ${builderQuestions.map((q, idx) => `
+                        <div class="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                          <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold uppercase text-tealhub-600">Question ${idx + 1} • ${q.type.toUpperCase()}</span>
+                            <div class="flex items-center gap-2">
+                              <label class="text-xs text-slate-500">Points:</label>
+                              <input type="number" id="bq_pts_${idx}" value="${q.points}" min="1" max="100" class="w-16 px-2 py-1 rounded border border-slate-300 text-xs bg-white" />
+                              ${builderQuestions.length > 1 ? `<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 text-xs font-bold ml-2">Remove</button>` : ''}
+                            </div>
+                          </div>
+
+                          <input type="text" id="bq_prompt_${idx}" value="${(q.prompt || '').replace(/"/g, '&quot;')}"
+                            placeholder="Question prompt (supports LaTeX like $2x + 5 = 15$)..."
+                            class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-sm bg-white" />
+
+                          ${q.type === "mcq" ? `
+                            <div class="grid sm:grid-cols-2 gap-2">
+                              ${[0,1,2,3].map(oIdx => `
+                                <input type="text" id="bq_opt_${idx}_${oIdx}" value="${((q.options && q.options[oIdx]) || '').replace(/"/g, '&quot;')}"
+                                  placeholder="Choice ${oIdx + 1}" class="px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+                              `).join("")}
+                            </div>
+                            <div>
+                              <label class="text-xs font-semibold text-slate-600 mr-2">Correct Choice:</label>
+                              <select id="bq_corr_${idx}" class="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white">
+                                ${[0,1,2,3].map(oIdx => `<option value="${oIdx}" ${String(q.correctAnswer) === String(oIdx) ? 'selected' : ''}>Choice ${oIdx + 1}</option>`).join("")}
+                              </select>
+                            </div>
+                          ` : ''}
+
+                          ${q.type === "tf" ? `
+                            <div>
+                              <label class="text-xs font-semibold text-slate-600 mr-2">Correct Answer:</label>
+                              <select id="bq_corr_${idx}" class="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white">
+                                <option value="True" ${q.correctAnswer === 'True' ? 'selected' : ''}>True</option>
+                                <option value="False" ${q.correctAnswer === 'False' ? 'selected' : ''}>False</option>
+                              </select>
+                            </div>
+                          ` : ''}
+
+                          ${q.type === "fill" ? `
+                            <input type="text" id="bq_corr_${idx}" value="${(q.correctAnswer || '').replace(/"/g, '&quot;')}"
+                              placeholder="Reference answer (optional — flagged for your review)"
+                              class="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs bg-white" />
+                          ` : ''}
+
+                          ${q.type === "open" ? `
+                            <p class="text-xs text-slate-500 italic">Open-ended responses are automatically flagged for your manual review and partial/full credit scoring.</p>
+                          ` : ''}
+                        </div>
+                      `).join("")}
+                    </div>
+
+                    <button type="submit" class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
+                      ${editingAssignmentId ? 'Save Assignment Changes ✓' : 'Save Assignment ✓'}
+                    </button>
+                  </form>
+                ` : ''}
+
+                <!-- CHRONOLOGICAL SUBJECT ROADMAP LIST (ADD / EDIT / DELETE / PREVIEW / PUBLISH FROM SANDBOX) -->
+                <div class="space-y-3">
+                  ${subjectRoadmap.length === 0 ? `
+                    <div class="p-8 rounded-2xl border border-slate-200 bg-slate-50/50 text-center text-xs text-slate-500">
+                      No lessons or assignments in <strong>${parentSubjectTab}</strong> yet. Click <strong>+ New Lesson</strong> or <strong>+ New Homework / Quiz</strong> above.
+                    </div>
+                  ` : ''}
+
+                  ${subjectRoadmap.map(item => {
+                    if (item.kind === "lesson") {
+                      const l = item.data;
+                      const isSandboxDraft = l.studentId === SANDBOX_STUDENT_ID;
+                      const assignedLabel = isSandboxDraft ? "🧪 Sandbox Draft" : (l.studentId === "ALL" ? "All Students" : (getStudentById(l.studentId)?.name || "Student"));
+                      return `
+                        <div class="p-4 rounded-2xl border-l-4 ${isSandboxDraft ? 'border-l-amberwarm-500 bg-amberwarm-50/40' : 'border-l-tealhub-500 bg-tealhub-500/5'} border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                              <span class="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-tealhub-500 text-white">📖 Lesson</span>
+                              <span class="text-[11px] font-bold px-2 py-0.5 rounded ${isSandboxDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-white border border-slate-200 text-slate-700'}">${assignedLabel}</span>
+                              <span class="text-xs font-bold text-slate-600">${l.date || ''}</span>
+                            </div>
+                            <p class="font-bold text-sm text-ink">${l.title}</p>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                            ${isSandboxDraft && realStudents[0] ? `
+                              <button onclick="assignSandboxDraftToStudent('lesson', '${l.id}', '${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 hover:bg-sage-600 text-white font-bold text-xs">🚀 Assign to ${realStudents[0].name}</button>
+                            ` : ''}
+                            <button onclick="previewItemInStudentView('lesson', '${l.id}', '${l.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 hover:bg-amberwarm-400 text-ink font-bold text-xs">👁 Preview</button>
+                            <button onclick="startEditLesson('${l.id}')" class="px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-ink font-bold text-xs">✎ Edit</button>
+                            <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${realStudents[0]?.id || 'stu_1'}')" class="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-ink text-xs">🖨</button>
+                            <button onclick="deleteItem('lesson', '${l.id}')" class="px-2 py-1.5 rounded-lg bg-white border border-slate-200 text-red-500 hover:bg-red-50 text-xs font-bold">✕</button>
+                          </div>
+                        </div>
+                      `;
+                    } else {
+                      const a = item.data;
+                      const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+                      const isSandboxDraft = a.studentId === SANDBOX_STUDENT_ID;
+                      const assignedLabel = isSandboxDraft ? "🧪 Sandbox Draft" : (a.studentId === "ALL" ? "All Students" : (getStudentById(a.studentId)?.name || "Student"));
+                      return `
+                        <div class="sm:ml-6 p-4 rounded-2xl border border-slate-200 ${isSandboxDraft ? 'bg-amberwarm-50/30' : 'bg-white'} flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                              <span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-700">${a.type}</span>
+                              <span class="text-[11px] font-bold px-2 py-0.5 rounded ${isSandboxDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100 text-slate-700'}">${assignedLabel}</span>
+                              <span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'} • ${a.questions.length} Qs (${totalPts} pts)</span>
+                              ${a.strictMode ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">STRICT</span>` : ''}
+                            </div>
+                            <p class="font-bold text-sm text-ink">${a.title}</p>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                            ${isSandboxDraft && realStudents[0] ? `
+                              <button onclick="assignSandboxDraftToStudent('assignment', '${a.id}', '${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 hover:bg-sage-600 text-white font-bold text-xs">🚀 Assign to ${realStudents[0].name}</button>
+                            ` : ''}
+                            <button onclick="previewItemInStudentView('assignment', '${a.id}', '${a.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 hover:bg-amberwarm-400 text-ink font-bold text-xs">👁 Preview</button>
+                            <button onclick="startEditAssignment('${a.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-ink font-bold text-xs">✎ Edit</button>
+                            <button onclick="deleteItem('assignment', '${a.id}')" class="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-red-50 text-red-500 text-xs font-bold">✕</button>
+                          </div>
+                        </div>
+                      `;
+                    }
+                  }).join("")}
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- PARENT TAB 4: SCHEDULE, GOOGLE CALENDAR SYNC, SYLLABUS TABS & RESOURCES -->
+          ${parentTab === "schedule-hub" ? `
+            <div class="space-y-8">
+              <div class="grid lg:grid-cols-2 gap-6">
+                <div class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4">
+                  <div class="flex items-center justify-between">
+                    <h3 class="font-bold text-ink">📅 Weekly Schedule &amp; Google Calendar</h3>
+                    <button onclick="downloadScheduleICS()" class="px-3 py-1.5 rounded-xl bg-tealhub-500 text-white text-xs font-bold">
+                      ⬇ Export .ics
+                    </button>
+                  </div>
+
+                  <form onsubmit="addScheduleBlock(event)" class="grid grid-cols-2 gap-2.5 bg-white p-4 rounded-xl border border-slate-200">
+                    <select id="sch_day" class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs">
+                      <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option>
+                    </select>
+                    <select id="sch_category" class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs">
+                      <option>Independent Study</option>
+                      <option>Live Virtual Class</option>
+                      <option>Extracurricular</option>
+                    </select>
+                    <input type="time" id="sch_start" value="09:00" required class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs" />
+                    <input type="time" id="sch_end" value="10:00" required class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs" />
+                    <input type="text" id="sch_title" required placeholder="Block Title (e.g. Algebra Study)" class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs" />
+                    <select id="sch_subject" class="px-2.5 py-2 rounded-lg border border-slate-300 text-xs">
+                      ${allSubjects.map(s => `<option value="${s}">${s}</option>`).join("")}
+                      <option value="All Subjects">All Subjects</option>
+                    </select>
+                    <button type="submit" class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">
+                      ${editingScheduleId ? '✓ Update Time Block' : '+ Add Time Block'}
+                    </button>
+                  </form>
+
+                  <div class="space-y-2 max-h-60 overflow-y-auto">
+                    ${(appState.schedule || []).map(b => `
+                      <div class="flex items-center justify-between text-xs p-2.5 rounded-xl border border-slate-200/70 bg-white gap-2">
+                        <span><strong>${b.day} ${b.startTime}-${b.endTime}:</strong> ${b.title} (${b.category})</span>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <button onclick="startEditScheduleBlock('${b.id}')" class="text-tealhub-600 font-bold hover:underline">✎ Edit</button>
+                          <button onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold">✕</button>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+                <div class="space-y-6">
+                  <form onsubmit="saveGoogleCalendarEmbed(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3">
+                    <h3 class="font-bold text-ink">🔗 Embed Live Google Calendar (Optional)</h3>
+                    <p class="text-xs text-slate-500">Create a dedicated "Sunshine Homeschool" calendar in Google Calendar → Settings → Integrate calendar, and paste its public embed URL here.</p>
+                    <input type="text" id="gcal_embed_input" value="${(appState.settings.googleCalendarEmbedUrl || '').replace(/"/g, '&quot;')}"
+                      placeholder="https://calendar.google.com/calendar/embed?src=..."
+                      class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold">Save Calendar Link</button>
+                  </form>
+
+                  <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3.5">
+                    <div class="flex items-center justify-between">
+                      <h3 class="font-bold text-ink">📚 Course Syllabus &amp; Current Unit</h3>
+                      <span class="text-[11px] font-bold text-sage-700 bg-sage-100 px-2.5 py-0.5 rounded-full">Synced with Student Hub</span>
+                    </div>
+
+                    <div class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2.5">
+                      ${allSubjects.map(s => `
+                        <button type="button" onclick="selectParentSyllabusTab('${s}')"
+                          class="px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                            parentSyllabusSubject === s
+                              ? 'bg-tealhub-500 text-white shadow-sm'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:text-ink'
+                          }">
+                          ${s}
+                        </button>
+                      `).join("")}
+                    </div>
+
+                    <div>
+                      <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Current Unit (${parentSyllabusSubject})</label>
+                      <input type="text" id="syl_unit" value="${(activeSylObj.currentUnit || '').replace(/"/g, '&quot;')}"
+                        placeholder="Current Unit (e.g., Unit 3: Linear Functions)"
+                        class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white font-semibold text-ink" />
+                    </div>
+
+                    <div>
+                      <label class="block text-[11px] font-bold uppercase text-slate-500 mb-1">Course Syllabus &amp; Semester Overview</label>
+                      <textarea id="syl_text" rows="4" placeholder="Course syllabus & semester overview..."
+                        class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white text-slate-800 leading-relaxed">${activeSylObj.syllabus || ''}</textarea>
+                    </div>
+
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold">
+                      Save ${parentSyllabusSubject} Syllabus ✓
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              <div class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4">
+                <h3 class="font-bold text-ink">🔗 Manage Student Resource Library (Google Drive, Khan Academy, FLVS)</h3>
+                <form onsubmit="addLibraryResource(event)" class="grid sm:grid-cols-4 gap-3">
+                  <input type="text" id="res_title" required placeholder="Resource Name (e.g. Google Drive)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                  <input type="text" id="res_category" placeholder="Category (e.g. Google Workspace)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                  <input type="url" id="res_url" required placeholder="https://..." class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                  <button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">+ Add Resource</button>
+                  <input type="text" id="res_notes" placeholder="Helpful login note or study tip (optional)" class="sm:col-span-4 px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                </form>
+                <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                  ${(appState.resources || []).map(r => `
+                    <div class="p-3 rounded-xl bg-white border border-slate-200 flex items-center justify-between text-xs">
+                      <div class="truncate pr-2">
+                        <p class="font-bold text-ink truncate">${r.title}</p>
+                        <p class="text-slate-500 truncate">${r.url}</p>
+                      </div>
+                      <button onclick="deleteLibraryResource('${r.id}')" class="text-red-500 font-bold">✕</button>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- PARENT TAB 5: GRADEBOOK, LESSON COMPLETION & VOLUNTEER HOURS -->
+          ${parentTab === "gradebook" ? `
+            <div class="space-y-8">
+              <div>
+                <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-xs font-bold uppercase text-slate-500">Filter by Student:</span>
+                    ${["All", ...allStudents.map(s => s.id)].map(id => {
+                      const label = id === "All" ? "All Students" : getStudentById(id)?.name;
+                      return `
+                        <button onclick="setParentStudentFilter('${id}')"
+                          class="px-3 py-1 rounded-full text-xs font-bold transition ${
+                            parentStudentFilter === id ? 'bg-tealhub-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }">
+                          ${label}
+                        </button>
+                      `;
+                    }).join("")}
+                  </div>
+                  <button onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700">
+                    ⬇ Export Grades (CSV)
+                  </button>
+                </div>
+
+                <!-- LESSON COMPLETION TRACKER (UNGRADED) -->
+                <h3 class="font-bold text-ink text-sm mb-3">📖 Class Lesson Completion Status (Ungraded)</h3>
+                <div class="rounded-2xl border border-slate-200 overflow-hidden mb-8">
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                          <th class="py-3 px-4">Student</th>
+                          <th class="py-3 px-4">Subject</th>
+                          <th class="py-3 px-4">Lesson Title</th>
+                          <th class="py-3 px-4">Status</th>
+                          <th class="py-3 px-4">Grade</th>
+                          <th class="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100">
+                        ${allStudents
+                          .filter(stu => parentStudentFilter === "All" || stu.id === parentStudentFilter)
+                          .flatMap(stu => (appState.lessons || [])
+                            .filter(l => isLessonVisibleToStudent(l, stu.id))
+                            .map(l => {
+                              const completedAt = l.completedBy?.[stu.id];
+                              const isSandbox = stu.id === SANDBOX_STUDENT_ID;
+                              return `
+                                <tr class="${isSandbox ? 'bg-amberwarm-50/40' : ''}">
+                                  <td class="py-3 px-4 font-bold text-ink">${stu.name}</td>
+                                  <td class="py-3 px-4 font-semibold text-slate-700">${l.subject}</td>
+                                  <td class="py-3 px-4 font-medium text-ink">${l.title}</td>
+                                  <td class="py-3 px-4">
+                                    ${completedAt
+                                      ? `<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">✓ Completed (${new Date(completedAt).toLocaleDateString()})</span>`
+                                      : `<span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">Not Completed</span>`}
+                                  </td>
+                                  <td class="py-3 px-4 text-xs font-semibold text-slate-400">Ungraded</td>
+                                  <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+                                    ${completedAt ? `
+                                      <button onclick="resetLessonCompletion('${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">↺ Reopen</button>
+                                    ` : ''}
+                                    <button onclick="openPrintablePortfolio('lesson', '${l.id}', '${stu.id}')" class="px-2.5 py-1 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
+                                  </td>
+                                </tr>
+                              `;
+                            })
+                          ).join("")}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <!-- GRADED ASSESSMENTS & HOMEWORK TABLE -->
+                <h3 class="font-bold text-ink text-sm mb-3">📝 Homework, Daily Warm-Ups &amp; Assessments</h3>
+                <div class="rounded-2xl border border-slate-200 overflow-hidden">
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                          <th class="py-3.5 px-4">Student</th>
+                          <th class="py-3.5 px-4">Subject</th>
+                          <th class="py-3.5 px-4">Assessment / Assignment</th>
+                          <th class="py-3.5 px-4">Status</th>
+                          <th class="py-3.5 px-4">Score</th>
+                          <th class="py-3.5 px-4">Focus / Alert Reason</th>
+                          <th class="py-3.5 px-4 text-right">Portfolio / Review / Reopen</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100">
+                        ${allStudents
+                          .filter(stu => parentStudentFilter === "All" || stu.id === parentStudentFilter)
+                          .flatMap(stu => (appState.assignments || [])
+                            .filter(a => isAssignmentVisibleToStudent(a, stu.id))
+                            .map(a => {
+                              const subKey = getSubKey(stu.id, a.id);
+                              const sub = subs[subKey];
+                              const totalPts = a.questions.reduce((s, q) => s + Number(q.points || 0), 0);
+                              const pct = sub && sub.earnedPoints !== undefined && totalPts > 0
+                                ? Math.round((sub.earnedPoints / totalPts) * 100) + "%"
+                                : "—";
+                              const violations = sub?.violations || [];
+                              const isSandbox = stu.id === SANDBOX_STUDENT_ID;
+
+                              return `
+                                <tr class="${isSandbox ? 'bg-amberwarm-50/40' : ''}">
+                                  <td class="py-3.5 px-4 font-bold text-ink">${stu.name}</td>
+                                  <td class="py-3.5 px-4 font-semibold text-slate-700">${a.subject}</td>
+                                  <td class="py-3.5 px-4 font-medium text-ink">${a.title}</td>
+                                  <td class="py-3.5 px-4">
+                                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                      !sub ? 'bg-slate-100 text-slate-500' :
+                                      sub.status === 'graded' ? 'bg-emerald-50 text-emerald-700' :
+                                      sub.status === 'needs_review' ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-blue-50 text-blue-700'
+                                    }">
+                                      ${!sub ? 'Not Started' : sub.status.replace('_', ' ')}
+                                    </span>
+                                  </td>
+                                  <td class="py-3.5 px-4 font-bold text-ink">
+                                    ${sub && sub.earnedPoints !== undefined ? `${sub.earnedPoints}/${totalPts} (${pct})` : '—'}
+                                  </td>
+                                  <td class="py-3.5 px-4 text-xs max-w-xs">
+                                    ${a.strictMode
+                                      ? (violations.length > 0
+                                          ? `<div class="text-red-600 font-bold">⚠ ${violations.length} alert(s)</div><div class="text-[11px] text-red-700 leading-snug mt-0.5">${violations.join("; ")}</div>`
+                                          : `<span class="text-emerald-600 font-semibold">✓ Clean</span>`)
+                                      : `<span class="text-slate-400">Standard</span>`}
+                                  </td>
+                                  <td class="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                                    ${sub ? `
+                                      <button onclick="reopenAssignmentSubmission('${subKey}')" title="Clear submission so student can retake" class="px-2.5 py-1.5 rounded-lg border border-amberwarm-400 bg-amberwarm-50 text-amberwarm-600 text-xs font-bold hover:bg-amberwarm-100">↺ Reopen</button>
+                                    ` : ''}
+                                    ${sub && (sub.status === 'graded' || sub.status === 'needs_review') ? `
+                                      <button onclick="openSubmissionReview('${subKey}')" class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold hover:bg-slate-50">Review</button>
+                                      <button onclick="openPrintablePortfolio('submission', '${a.id}', '${stu.id}')" class="px-3 py-1.5 rounded-lg bg-ink text-white text-xs font-bold">🖨 PDF</button>
+                                    ` : ''}
+                                  </td>
+                                </tr>
+                              `;
+                            })
+                          ).join("")}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200">
+                <h3 class="font-bold text-ink mb-3">🏅 Verify Student Extracurricular &amp; Volunteer Hours</h3>
+                <div class="space-y-2">
+                  ${(appState.activityLogs || []).map(act => {
+                    const stu = getStudentById(act.studentId);
+                    return `
+                      <div class="p-3.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-4 text-xs">
+                        <div>
+                          <span class="font-bold text-tealhub-600">${stu?.name} • ${act.date} • ${act.hours} hrs</span>
+                          <p class="font-bold text-ink text-sm">${act.organization} (${act.type})</p>
+                          <p class="text-slate-600">${act.description}</p>
+                        </div>
+                        <button onclick="toggleVerifyActivity('${act.id}')"
+                          class="px-3.5 py-2 rounded-xl font-bold shrink-0 ${
+                            act.verifiedByParent ? 'bg-emerald-100 text-emerald-800' : 'bg-ink text-white'
+                          }">
+                          ${act.verifiedByParent ? '✓ Parent Verified' : 'Click to Verify'}
+                        </button>
+                      </div>
+                    `;
+                  }).join("")}
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- PARENT TAB 6: STUDENTS & PIN (SEARCHABLE PER-STUDENT COURSES + ADD STUDENT) -->
+          ${parentTab === "students" ? `
+            <div class="grid lg:grid-cols-12 gap-6">
+              <div class="lg:col-span-8 space-y-5">
+                <div class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4">
+                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 class="text-lg font-display font-extrabold text-ink">Student Accounts &amp; Individual Courses</h3>
+                      <p class="text-xs text-slate-500">Each student has their own grade level, Gmail login, and custom course list.</p>
+                    </div>
+                    <input type="search" id="stu-search-box" value="${studentSearchQuery.replace(/"/g, '&quot;')}"
+                      oninput="updateStudentSearch(this.value)"
+                      placeholder="🔍 Search students by name or grade..."
+                      class="px-3.5 py-2 rounded-xl border border-slate-300 text-xs bg-white w-full sm:w-64" />
+                  </div>
+
+                  <div class="space-y-4">
+                    ${filteredStudentsList.map(stu => `
+                      <div class="p-5 rounded-2xl bg-white border border-slate-200 space-y-3 shadow-sm">
+                        <div class="grid sm:grid-cols-3 gap-3">
+                          <div>
+                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">First Name</label>
+                            <input type="text" id="edit_stu_name_${stu.id}" value="${stu.name}" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold text-ink" />
+                          </div>
+                          <div>
+                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Grade Level</label>
+                            <input type="text" id="edit_stu_grade_${stu.id}" value="${stu.gradeLevel}" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+                          </div>
+                          <div>
+                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">Student Gmail Address</label>
+                            <input type="email" id="edit_stu_email_${stu.id}" value="${stu.email || ''}" placeholder="student@gmail.com" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs" />
+                          </div>
+                          <div class="sm:col-span-3">
+                            <label class="block text-[10px] font-bold uppercase text-slate-400 mb-1">${stu.name}'s Courses (Comma-Separated)</label>
+                            <input type="text" id="edit_stu_subjects_${stu.id}" value="${(stu.subjects || DEFAULT_SUBJECTS).join(', ')}"
+                              class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs bg-slate-50/60" />
+                          </div>
+                        </div>
+                        <div class="flex justify-between items-center pt-1">
+                          ${realStudents.length > 1
+                            ? `<button type="button" onclick="removeStudent('${stu.id}')" class="text-xs text-red-500 font-bold hover:underline">Remove Student</button>`
+                            : `<span></span>`}
+                          <button type="button" onclick="updateStudentInfo('${stu.id}')"
+                            class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold hover:opacity-90">
+                            Save ${stu.name}'s Profile &amp; Courses ✓
+                          </button>
+                        </div>
+                      </div>
+                    `).join("")}
+                  </div>
+                </div>
+
+                <form onsubmit="addNewStudent(event)" class="bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-3">
+                  <h4 class="font-display font-extrabold text-ink text-base">+ Add Another Student Account</h4>
+                  <p class="text-xs text-slate-500">Add a sibling or another student in a different grade with their own custom courses.</p>
+                  <div class="grid sm:grid-cols-3 gap-3">
+                    <input type="text" id="new_stu_name" required placeholder="First Name" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                    <input type="text" id="new_stu_grade" placeholder="Grade (e.g. 5th Grade)" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                    <input type="email" id="new_stu_email" placeholder="student@gmail.com" class="px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                    <input type="text" id="new_stu_subjects" placeholder="Courses (e.g. 5th Grade Math, Reading, Earth Science, Social Studies)" class="sm:col-span-3 px-3 py-2 rounded-xl border border-slate-300 text-xs bg-white" />
+                  </div>
+                  <button type="submit" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold hover:bg-sage-600 shadow-sm">
+                    + Add Student Account
+                  </button>
+                </form>
+              </div>
+
+              <form onsubmit="saveGeneralSettings(event)" class="lg:col-span-4 bg-slate-50/70 rounded-2xl p-6 border border-slate-200 space-y-4 h-fit">
+                <h3 class="text-lg font-display font-extrabold text-ink">Parent Security &amp; Year</h3>
+                <div>
+                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent / Teacher PIN (Strict Test Unlock)</label>
+                  <input type="text" id="set_parent_pin" value="${appState.settings.parentPin}" maxlength="8" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white font-mono font-bold" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Academic Year</label>
+                  <input type="text" id="set_school_year" value="${appState.settings.schoolYear}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold uppercase text-slate-500 mb-1">Annual Reading Goal (Books)</label>
+                  <input type="number" id="set_reading_goal" value="${appState.settings.readingGoalBooks || 20}" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm bg-white" />
+                </div>
+                <button type="submit" class="w-full py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Save Security &amp; Year</button>
+              </form>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW E: PARENT SUBMISSION GRADER & FEEDBACK
+    // -------------------------------------------------------------------------
+    function renderParentSubmissionGrader(subKey) {
+      const sub = (appState.submissions || {})[subKey];
+      if (!sub) return "";
+      const asg = (appState.assignments || []).find(a => a.id === sub.assignmentId);
+      const stu = getStudentById(sub.studentId);
+      if (!asg) return "";
+
+      return `
+        <div class="max-w-3xl mx-auto">
+          <div class="flex items-center justify-between mb-4">
+            <button onclick="closeSubmissionReview()" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">
+              ← Back to Parent Hub
+            </button>
+            <button onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold hover:bg-amberwarm-400 hover:text-ink">
+              ↺ Reopen Assignment for Student
+            </button>
+          </div>
+
+          <div class="bg-white rounded-3xl p-6 border border-white shadow-sm mb-6">
+            <span class="text-xs font-bold uppercase text-tealhub-600">${stu?.name || 'Student'} • ${asg.subject} • ${asg.type}</span>
+            <h2 class="text-2xl font-display font-extrabold text-ink mt-1">${asg.title}</h2>
+            <p class="text-xs text-slate-500 mt-1">Submitted: ${new Date(sub.submittedAt).toLocaleString()}</p>
+
+            ${sub.projectLink ? `
+              <div class="mt-4 p-3.5 rounded-2xl bg-sage-50 border border-sage-100 flex items-center justify-between">
+                <span class="text-xs font-bold text-sage-700">📎 Attached Google Drive / Project Link:</span>
+                <a href="${sub.projectLink}" target="_blank" rel="noopener noreferrer" class="text-xs font-bold underline text-ink">Open Student Project ↗</a>
+              </div>
+            ` : ''}
+
+            ${sub.violations && sub.violations.length > 0 ? `
+              <div class="mt-4 p-4 rounded-2xl bg-red-50 border border-red-200">
+                <p class="text-xs font-bold uppercase text-red-700 mb-1">⚠ Strict Test Mode Focus Log (${sub.violations.length} alert)</p>
+                <ul class="text-xs text-red-800 list-disc ml-4 space-y-1">
+                  ${sub.violations.map(v => `<li>${v}</li>`).join("")}
+                </ul>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="space-y-4">
+            ${asg.questions.map((q, idx) => {
+              const rawAns = sub.answers[q.id] ?? "";
+              let displayAns = rawAns;
+              if (q.type === "mcq" && rawAns !== "") {
+                displayAns = formatMathOption(q.options[Number(rawAns)] || rawAns);
+              }
+              const currentScore = sub.questionScores[q.id] ?? 0;
+
+              return `
+                <div class="bg-white rounded-3xl p-6 border border-white shadow-sm">
+                  <div class="flex justify-between items-start gap-4 mb-3">
+                    <p class="font-semibold text-ink">${idx + 1}. ${formatMathOption(q.prompt)}</p>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                      <input type="number" id="grade_q_${q.id}" value="${currentScore}" min="0" max="${q.points}" step="0.5"
+                        class="w-16 px-2 py-1 rounded-lg border border-slate-300 text-sm font-bold text-right" />
+                      <span class="text-xs font-bold text-slate-500">/ ${q.points} pts</span>
+                    </div>
+                  </div>
+
+                  <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-800">
+                    <span class="block text-[11px] font-bold uppercase text-slate-400 mb-1">${stu?.name || 'Student'}'s Answer:</span>
+                    ${displayAns || '<em class="text-slate-400">No answer provided</em>'}
+                  </div>
+
+                  ${q.correctAnswer && (q.type === 'mcq' || q.type === 'tf' || q.type === 'fill') ? `
+                    <p class="text-xs text-emerald-700 mt-2 font-medium">
+                      Answer Key: ${q.type === 'mcq' ? formatMathOption(q.options[Number(q.correctAnswer)]) : formatMathOption(q.correctAnswer)}
+                    </p>
+                  ` : ''}
+                </div>
+              `;
+            }).join("")}
+          </div>
+
+          <div class="mt-6 bg-white rounded-3xl p-6 border border-white shadow-sm space-y-4">
+            <label class="block text-xs font-bold uppercase text-slate-500">Encouraging Feedback &amp; Notes for Portfolio</label>
+            <textarea id="grade_parent_feedback" rows="3" placeholder="Great work showing your steps on the equations!"
+              class="w-full px-4 py-3 rounded-xl border border-slate-300 text-sm">${sub.parentFeedback || ''}</textarea>
+            <button onclick="saveParentGradeReview('${subKey}')"
+              class="px-6 py-3 rounded-xl bg-sage-500 hover:bg-sage-600 text-white font-bold text-sm shadow-sm">
+              Finalize Grade &amp; Save Feedback
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // -------------------------------------------------------------------------
+    // VIEW F: PRINTABLE PORTFOLIO RECORD
+    // -------------------------------------------------------------------------
+    function renderPrintablePortfolioView() {
+      const { kind, id, studentId } = printableRecord;
+      const stu = getStudentById(studentId);
+
+      let headerTitle = "";
+      let bodyHtml = "";
+
+      if (kind === "lesson") {
+        const item = (appState.lessons || []).find(l => l.id === id);
+        if (!item) return "";
+        headerTitle = item.title;
+        bodyHtml = `
+          <div class="mb-6 text-xs text-slate-600 flex gap-6">
+            <span><strong>Subject:</strong> ${item.subject}</span>
+            <span><strong>Record Type:</strong> Completed Class Lesson</span>
+            <span><strong>Date Completed:</strong> ${item.completedBy?.[stu.id] ? new Date(item.completedBy[stu.id]).toLocaleDateString() : item.date}</span>
+          </div>
+          <div class="text-sm text-slate-800 leading-relaxed space-y-3">${formatRichText(item.content)}</div>
+        `;
+      } else if (kind === "submission") {
+        const item = (appState.assignments || []).find(a => a.id === id);
+        const sub = (appState.submissions || {})[getSubKey(stu.id, id)];
+        if (!item) return "";
+        const pct = sub && sub.totalPoints > 0 ? Math.round((sub.earnedPoints / sub.totalPoints) * 100) : 0;
+        headerTitle = item.title;
+        bodyHtml = `
+          <div class="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg flex justify-between items-center text-sm">
+            <div>
+              <p><strong>Subject:</strong> ${item.subject} (${item.type})</p>
+              <p><strong>Date Submitted:</strong> ${sub?.submittedAt ? new Date(sub.submittedAt).toLocaleDateString() : 'N/A'}</p>
+            </div>
+            <div class="text-right">
+              <p class="text-lg font-bold">Final Score: ${sub?.earnedPoints ?? 0} / ${sub?.totalPoints ?? 0} (${pct}%)</p>
+            </div>
+          </div>
+          ${sub?.parentFeedback ? `<div class="mb-6 p-3.5 border-l-4 border-slate-800 bg-slate-50 text-sm"><strong>Evaluator Feedback:</strong> ${sub.parentFeedback}</div>` : ''}
+          <div class="space-y-4">
+            ${item.questions.map((q, idx) => {
+              const ans = sub?.answers?.[q.id] ?? "";
+              const displayAns = q.type === "mcq" && ans !== "" ? formatMathOption(q.options[Number(ans)]) : ans;
+              return `
+                <div class="border-b border-slate-200 pb-3 page-break-inside-avoid">
+                  <div class="flex justify-between text-sm font-semibold mb-1">
+                    <span>${idx + 1}. ${formatMathOption(q.prompt)}</span>
+                    <span>${sub?.questionScores?.[q.id] ?? 0} / ${q.points} pts</span>
+                  </div>
+                  <p class="text-sm text-slate-700 pl-4"><strong>Response:</strong> ${displayAns || '—'}</p>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `;
+      } else if (kind === "reading") {
+        const books = (appState.readingLogs || []).filter(r => r.studentId === stu.id);
+        headerTitle = "Annual Literature & Reading Log";
+        bodyHtml = `
+          <p class="text-sm mb-4"><strong>Total Books Completed:</strong> ${books.length} • <strong>Total Pages:</strong> ${books.reduce((s, b) => s + Number(b.pages || 0), 0)}</p>
+          <div class="space-y-3">
+            ${books.map(b => `
+              <div class="border-b border-slate-200 pb-3 page-break-inside-avoid text-sm">
+                <p class="font-bold">${b.title} <span class="font-normal text-slate-600">by ${b.author} (${b.pages} pages • ${b.dateFinished})</span></p>
+                <p class="text-slate-700 mt-1">${b.reflection}</p>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      } else if (kind === "activities") {
+        const acts = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
+        headerTitle = "Extracurricular & Community Service Transcript Log";
+        bodyHtml = `
+          <p class="text-sm mb-4"><strong>Total Documented Hours:</strong> ${acts.reduce((s, a) => s + Number(a.hours || 0), 0).toFixed(1)} hours</p>
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="border-b-2 border-slate-800">
+                <th class="py-2">Date</th><th class="py-2">Category</th><th class="py-2">Organization &amp; Description</th><th class="py-2">Hours</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200">
+              ${acts.map(a => `
+                <tr>
+                  <td class="py-2 pr-3">${a.date}</td>
+                  <td class="py-2 pr-3 font-semibold">${a.type}</td>
+                  <td class="py-2 pr-3"><strong>${a.organization}:</strong> ${a.description}</td>
+                  <td class="py-2 font-bold">${Number(a.hours).toFixed(1)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        `;
+      }
+
+      return `
+        <div class="max-w-3xl mx-auto">
+          <div class="flex items-center justify-between mb-6 no-print">
+            <button onclick="closePrintablePortfolio()" class="text-sm font-bold text-slate-700 hover:text-ink bg-white/80 px-3.5 py-2 rounded-xl">
+              ← Exit Print Preview
+            </button>
+            <button onclick="window.print()" class="px-5 py-2.5 rounded-xl bg-ink text-white text-sm font-bold shadow-sm hover:opacity-90">
+              🖨 Print / Save as PDF
+            </button>
+          </div>
+
+          <div class="bg-white rounded-3xl p-8 sm:p-12 border border-slate-200 shadow-sm print-container">
+            <div class="border-b-2 border-slate-900 pb-4 mb-6 flex justify-between items-end">
+              <div>
+                <p class="text-xs font-bold uppercase tracking-widest text-terracotta-500">Sunshine Homeschool • Official Portfolio Record</p>
+                <h1 class="text-2xl font-bold text-slate-900 mt-1">${headerTitle}</h1>
+              </div>
+              <div class="text-right text-xs text-slate-600 space-y-0.5">
+                <p><strong>Student:</strong> ${stu.name} (${stu.gradeLevel})</p>
+                <p><strong>Academic Year:</strong> ${appState.settings.schoolYear}</p>
+              </div>
+            </div>
+
+            ${bodyHtml}
+
+            <div class="mt-12 pt-6 border-t border-slate-300 flex justify-between text-xs text-slate-500">
+              <span>Sunshine Homeschool — Verified Educator Record</span>
+              <span>Date Printed: ${new Date().toLocaleDateString()}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Expose portfolio builders for Annual Review individual class printables
+    window.buildClassPortfolioHTML = buildClassPortfolioHTML;
+    window.getStudentById = getStudentById;
+    window.computeStudentMetrics = computeStudentMetrics;
+
+    // Boot Application
+    render();
+  </script>
+</body>
+</html>
