@@ -166,8 +166,9 @@
     let activeLessonId = null, activeAssignmentId = null, activeReviewKey = null, printableRecord = null;
     let breakTimerSeconds = 300, breakTimerRunning = false, breakTimerInterval = null;
     let strictSession = { active: false, assignmentId: null, studentId: null, unlockedStarted: false, pausedLocked: false, violations: [] };
+    let isFilePickerOpen = false;
     let builderQuestions = [{ id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
-    let pendingUploadedWorkFile = null; // Stores uploaded PDF/image data URL during active submission
+    let pendingUploadedWorkFile = null;
 
     function showSavedToast(msg) {
       let toast = document.getElementById("cloud-save-toast");
@@ -320,15 +321,31 @@
       return (appState.settings.students || []).find(s => s.id === id) || appState.settings.students[0];
     }
     function getSubKey(studentId, assignmentId) { return `${studentId}_${assignmentId}`; }
+
+    // Student visibility respects BOTH studentId assignment AND the student's enrolled subjects
     function isLessonVisibleToStudent(lesson, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
       if (lesson.studentId === SANDBOX_STUDENT_ID) return false;
+      const stu = getStudentById(studentId);
+      const enrolled = getStudentSubjects(stu);
+      if (lesson.subject && !enrolled.includes(lesson.subject)) return false;
       return !lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId;
     }
     function isAssignmentVisibleToStudent(asg, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
       if (asg.studentId === SANDBOX_STUDENT_ID) return false;
+      const stu = getStudentById(studentId);
+      const enrolled = getStudentSubjects(stu);
+      if (asg.subject && !enrolled.includes(asg.subject)) return false;
       return !asg.studentId || asg.studentId === "ALL" || asg.studentId === studentId;
+    }
+    function isScheduleBlockVisibleToStudent(block, studentId) {
+      if (studentId === SANDBOX_STUDENT_ID) return true;
+      if (block.studentId && block.studentId !== "ALL" && block.studentId !== studentId) return false;
+      const stu = getStudentById(studentId);
+      const enrolled = getStudentSubjects(stu);
+      if (block.subject && block.subject !== "All Subjects" && !enrolled.includes(block.subject)) return false;
+      return true;
     }
     function isLessonCompletedBy(lesson, studentId) { return Boolean(lesson.completedBy && lesson.completedBy[studentId]); }
     function isCheckPassedBy(lesson, studentId) { return Boolean(lesson.checkPassedBy && lesson.checkPassedBy[studentId]); }
@@ -338,7 +355,6 @@
       return txt.includes("scan & upload") || txt.includes("attach pdf");
     }
 
-    // Chronological Sorting Helpers (Week 1 -> Week 2 -> Week 3, Lesson -> Check-In -> Homework -> Project -> Quiz/Test)
     function getAssignmentSubOrder(asg) {
       const titleLow = (asg.title || "").toLowerCase();
       if (titleLow.includes("check-in") || titleLow.includes("warm-up")) return 1;
@@ -347,7 +363,6 @@
       if (asg.type === "Quiz") return 4;
       return 5;
     }
-
     function compareAssignmentsChronological(a, b) {
       const dA = a.dueDate || "9999-12-31", dB = b.dueDate || "9999-12-31";
       if (dA !== dB) return dA.localeCompare(dB);
@@ -355,7 +370,6 @@
       if (oA !== oB) return oA - oB;
       return (a.title || "").localeCompare(b.title || "");
     }
-
     function getChronologicalTimelineForSubject(subject, lessonsList, assignmentsList) {
       const combined = [
         ...lessonsList.filter(l => l.subject === subject).map(l => ({ kind: "lesson", sortDate: l.date || "9999-12-31", subOrd: 0, data: l })),
@@ -391,13 +405,9 @@
       const d = getNextDateForDayName(block.day), s = (block.startTime || "09:00").replace(":", "") + "00", e = (block.endTime || "10:00").replace(":", "") + "00";
       return `https://calendar.google.com/calendar/render?${new URLSearchParams({ action: "TEMPLATE", text: `[Sunshine Homeschool] ${block.title}`, dates: `${d}T${s}/${d}T${e}`, details: `${block.category} | ${block.subject}`, recur: `RRULE:FREQ=WEEKLY;BYDAY=${DAY_TO_RRULE[block.day] || "MO"}` })}`;
     }
-    function buildGoogleCalendarAssignmentUrl(asg) {
-      const d = (asg.dueDate || new Date().toISOString().slice(0, 10)).replace(/-/g, "");
-      return `https://calendar.google.com/calendar/render?${new URLSearchParams({ action: "TEMPLATE", text: `Due: ${asg.title} (${asg.subject})`, dates: `${d}T090000/${d}T100000`, details: `${asg.type} for ${asg.subject}` })}`;
-    }
-    window.downloadScheduleICS = () => {
+    window.downloadScheduleICS = (studentId = null) => {
       let lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Sunshine Homeschool//Schedule//EN"];
-      (appState.schedule || []).forEach(b => {
+      (appState.schedule || []).filter(b => !studentId || isScheduleBlockVisibleToStudent(b, studentId)).forEach(b => {
         const d = getNextDateForDayName(b.day);
         lines.push("BEGIN:VEVENT", `UID:${b.id}@sunshine`, `SUMMARY:${b.title}`, `DTSTART:${d}T${(b.startTime||"09:00").replace(":","")}00`, `DTEND:${d}T${(b.endTime||"10:00").replace(":","")}00`, `RRULE:FREQ=WEEKLY;BYDAY=${DAY_TO_RRULE[b.day]||"MO"}`, "END:VEVENT");
       });
@@ -405,51 +415,27 @@
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines.join("\r\n")], { type: "text/calendar" })); a.download = "sunshine-homeschool-calendar.ics"; a.click();
     };
 
-    // =========================================================================
-    // RICH TEXT & STACKED STEP-BY-STEP EQUATION RENDERER (RED SIDE ANNOTATIONS)
-    // =========================================================================
+    // Rich Text & Stacked Math Renderer
     function formatRichText(raw) {
       if (!raw) return "";
       const normalized = String(raw).replace(/\\n/g, "\n");
       const lines = normalized.split(/\r?\n/);
       let html = "", inStepBox = false;
-
       for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trim();
-        // Match stacked step lines: $$equation || red explanation note$$
         const stepMatch = trimmed.match(/^\$\$(.+?)\s*\|\|\s*(.+?)\$\$$/);
         if (stepMatch) {
-          if (!inStepBox) {
-            html += `<div class="my-4 rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-2">`;
-            inStepBox = true;
-          }
+          if (!inStepBox) { html += `<div class="my-4 rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-2">`; inStepBox = true; }
           const eqSafe = stepMatch[1].trim().replace(/</g, "&lt;").replace(/>/g, "&gt;");
-          const noteSafe = stepMatch[2].trim()
-            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-          html += `
-            <div class="grid sm:grid-cols-12 items-center gap-2 py-2 border-b border-slate-200/70 last:border-b-0">
-              <div class="sm:col-span-6 font-medium text-ink text-base pl-1">$$${eqSafe}$$</div>
-              <div class="sm:col-span-6 text-xs sm:text-sm font-bold text-red-600 sm:text-right pr-1">← ${noteSafe}</div>
-            </div>`;
+          const noteSafe = stepMatch[2].trim().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          html += `<div class="grid sm:grid-cols-12 items-center gap-2 py-2 border-b border-slate-200/70 last:border-b-0"><div class="sm:col-span-6 font-medium text-ink text-base pl-1">$$${eqSafe}$$</div><div class="sm:col-span-6 text-xs sm:text-sm font-bold text-red-600 sm:text-right pr-1">← ${noteSafe}</div></div>`;
           continue;
-        } else if (inStepBox) {
-          html += `</div>`;
-          inStepBox = false;
-        }
-
+        } else if (inStepBox) { html += `</div>`; inStepBox = false; }
         const safeLine = lines[i].replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        if (/^###\s+/.test(safeLine)) {
-          html += `<h3 class="text-lg font-bold text-slate-900 mt-5 mb-2">${safeLine.replace(/^###\s+/, "")}</h3>`;
-        } else if (/^##\s+/.test(safeLine)) {
-          html += `<h2 class="text-xl font-bold text-slate-900 mt-6 mb-2">${safeLine.replace(/^##\s+/, "")}</h2>`;
-        } else if (/^\*\s+/.test(safeLine)) {
-          const item = safeLine.replace(/^\*\s+/, "").replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
-          html += `<li class="ml-5 list-disc text-slate-700 my-1">${item}</li>`;
-        } else {
-          const formatted = safeLine.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
-          html += (formatted.trim() === "" ? "<br>" : `<div>${formatted}</div>`);
-        }
+        if (/^###\s+/.test(safeLine)) html += `<h3 class="text-lg font-bold text-slate-900 mt-5 mb-2">${safeLine.replace(/^###\s+/, "")}</h3>`;
+        else if (/^##\s+/.test(safeLine)) html += `<h2 class="text-xl font-bold text-slate-900 mt-6 mb-2">${safeLine.replace(/^##\s+/, "")}</h2>`;
+        else if (/^\*\s+/.test(safeLine)) html += `<li class="ml-5 list-disc text-slate-700 my-1">${safeLine.replace(/^\*\s+/, "").replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>')}</li>`;
+        else { const fmt = safeLine.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>'); html += (fmt.trim() === "" ? "<br>" : `<div>${fmt}</div>`); }
       }
       if (inStepBox) html += `</div>`;
       return html;
@@ -465,9 +451,8 @@
     }
 
     function triggerMathRender(retries = 6) {
-      if (window.renderMathInElement) {
-        window.renderMathInElement(document.body, { delimiters: [{ left: "$$", right: "$$", display: true }, { left: "$", right: "$", display: false }], throwOnError: false });
-      } else if (retries > 0) setTimeout(() => triggerMathRender(retries - 1), 150);
+      if (window.renderMathInElement) window.renderMathInElement(document.body, { delimiters: [{ left: "$$", right: "$$", display: true }, { left: "$", right: "$", display: false }], throwOnError: false });
+      else if (retries > 0) setTimeout(() => triggerMathRender(retries - 1), 150);
     }
 
     function extractYouTubeEmbedUrl(url) {
@@ -476,8 +461,9 @@
       return match ? `https://www.youtube.com/embed/${match[1]}` : null;
     }
 
-    // Strict Mode Listeners
+    // Strict Mode Listeners (Whitelists native file picker dialog)
     function handleVisibilityOrBlur(reason) {
+      if (isFilePickerOpen) return;
       if (!strictSession.active || !strictSession.unlockedStarted || strictSession.pausedLocked) return;
       strictSession.pausedLocked = true;
       const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -571,7 +557,7 @@
       saveState("Checklist updated!");
     };
 
-    // Student Actions & File Upload Handler
+    // Student Actions & Whitelisted File Upload
     window.openLesson = (id) => { activeLessonId = id; activeAssignmentId = null; printableRecord = null; render(); };
     window.submitLessonCheck = (id) => {
       const l = (appState.lessons || []).find(x => x.id === id), sel = document.querySelector('input[name="lesson-check-opt"]:checked'), fb = document.getElementById("lesson-check-feedback");
@@ -588,7 +574,14 @@
       }
       render();
     };
+    window.triggerStudentWorkFilePicker = () => {
+      isFilePickerOpen = true;
+      const input = document.getElementById("student-work-file-input");
+      if (input) input.click();
+      window.addEventListener("focus", () => { setTimeout(() => { isFilePickerOpen = false; }, 500); }, { once: true });
+    };
     window.handleStudentWorkFileUpload = (e) => {
+      isFilePickerOpen = false;
       const file = e.target.files?.[0];
       if (!file) return;
       if (file.size > 4 * 1024 * 1024) {
@@ -630,7 +623,6 @@
       const fileName = pendingUploadedWorkFile?.name || prev.uploadedFileName || "";
       const fileData = pendingUploadedWorkFile?.dataUrl || prev.uploadedFileData || "";
 
-      // Enforce required PDF / work upload if enabled on this assignment
       if (isWorkUploadRequired(asg) && !linkVal && !fileData) {
         alert("Work Upload Required: Please attach your PDF/photo file or paste your Google Drive link showing your written steps before submitting.");
         return;
@@ -733,10 +725,25 @@
 
     window.reopenAssignmentSubmission = (subKey) => { if (!confirm("Reopen this assignment?")) return; delete appState.submissions[subKey]; activeReviewKey = null; saveState("Assignment reopened!"); };
     window.resetLessonCompletion = (lessonId, stuId) => { const l = appState.lessons.find(x => x.id === lessonId); if (l?.completedBy) delete l.completedBy[stuId]; if (l?.checkPassedBy) delete l.checkPassedBy[stuId]; saveState("Lesson reopened!"); };
-    window.startEditScheduleBlock = (id) => { const b = appState.schedule.find(s => s.id === id); if (!b) return; editingScheduleId = id; ["day","category","start","end","title","subject"].forEach(k => document.getElementById(`sch_${k}`).value = b[k === "start" ? "startTime" : (k === "end" ? "endTime" : k)]); showSavedToast("Editing block above"); };
+    window.startEditScheduleBlock = (id) => {
+      const b = appState.schedule.find(s => s.id === id); if (!b) return;
+      editingScheduleId = id;
+      document.getElementById("sch_student").value = b.studentId || "ALL";
+      ["day","category","start","end","title","subject"].forEach(k => document.getElementById(`sch_${k}`).value = b[k === "start" ? "startTime" : (k === "end" ? "endTime" : k)]);
+      showSavedToast("Editing block above");
+    };
     window.addScheduleBlock = (e) => {
       e.preventDefault();
-      const obj = { id: editingScheduleId || "sch_" + Date.now(), day: document.getElementById("sch_day").value, startTime: document.getElementById("sch_start").value, endTime: document.getElementById("sch_end").value, title: document.getElementById("sch_title").value.trim(), category: document.getElementById("sch_category").value, subject: document.getElementById("sch_subject").value };
+      const obj = {
+        id: editingScheduleId || "sch_" + Date.now(),
+        studentId: document.getElementById("sch_student").value || "ALL",
+        day: document.getElementById("sch_day").value,
+        startTime: document.getElementById("sch_start").value,
+        endTime: document.getElementById("sch_end").value,
+        title: document.getElementById("sch_title").value.trim(),
+        category: document.getElementById("sch_category").value,
+        subject: document.getElementById("sch_subject").value
+      };
       if (editingScheduleId) { appState.schedule[appState.schedule.findIndex(s => s.id === editingScheduleId)] = obj; editingScheduleId = null; saveState("Block updated!"); }
       else { appState.schedule.push(obj); saveState("Block added!"); }
     };
@@ -760,7 +767,7 @@
     window.removeStudent = (id) => { if (appState.settings.students.length <= 1) return; if (confirm("Remove student?")) { appState.settings.students = appState.settings.students.filter(s => s.id !== id); saveState("Removed!"); } };
     window.saveGeneralSettings = (e) => { e.preventDefault(); appState.settings.schoolYear = document.getElementById("set_school_year").value.trim() || "2026–2027"; appState.settings.readingGoalBooks = Number(document.getElementById("set_reading_goal").value) || 20; const pin = document.getElementById("set_parent_pin").value.trim(); if (pin.length >= 4) appState.settings.parentPin = pin; saveState("Settings saved!"); };
 
-    // 2-Way CSV Export & Upsert Importer (Preserves chronological order)
+    // 2-Way CSV Export & Upsert Importer
     function csvEscape(v) { const s = String(v ?? ""); return (s.includes('"') || s.includes(',') || s.includes('\n')) ? '"' + s.replace(/"/g, '""') + '"' : s; }
     function parseCSVRows(text) {
       const rows = []; let row = [], val = "", inQ = false;
@@ -778,7 +785,7 @@
 
     window.exportCurrentCurriculumCSV = () => {
       const out = ["RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo"];
-      (appState.schedule || []).forEach(b => out.push(["Schedule", b.subject, b.title, b.day, `${b.startTime}-${b.endTime}`, b.category, "", "", "", "", b.id, "ALL"].map(csvEscape).join(",")));
+      (appState.schedule || []).forEach(b => out.push(["Schedule", b.subject, b.title, b.day, `${b.startTime}-${b.endTime}`, b.category, "", "", "", "", b.id, b.studentId || "ALL"].map(csvEscape).join(",")));
       [...(appState.lessons || [])].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(l => out.push(["Lesson", l.subject, l.title, l.date || "", "", (l.content || "").replace(/\r?\n/g, "\\n"), l.checkQuestion?.enabled ? "mcq" : "", (l.checkQuestion?.options || []).filter(Boolean).join(" | "), l.checkQuestion?.enabled ? String(l.checkQuestion.correctIndex ?? 0) : "", l.checkQuestion?.enabled ? (l.checkQuestion.prompt || "") : "", l.id, l.studentId || "stu_1"].map(csvEscape).join(",")));
       [...(appState.assignments || [])].sort(compareAssignmentsChronological).forEach(a => (a.questions || []).forEach(q => out.push(["Assignment", a.subject, a.title, a.dueDate || "", a.type || "Homework", q.prompt || "", q.type || "mcq", q.type === "mcq" ? (q.options || []).join(" | ") : "", q.correctAnswer || "", `${q.points || 10}${a.strictMode ? " STRICT" : ""}${isWorkUploadRequired(a) ? " REQUIRE_UPLOAD" : ""}`, a.id, a.studentId || "stu_1"].map(csvEscape).join(","))));
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([out.join("\n")], { type: "text/csv;charset=utf-8;" })); a.download = `Sunshine_Homeschool_Live_Curriculum_${new Date().toISOString().slice(0,10)}.csv`; a.click();
@@ -786,7 +793,7 @@
     };
 
     window.downloadCurriculumCSVTemplate = () => {
-      const sample = "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo\nSchedule,Pre-Algebra,Pre-Algebra Block,Monday,09:00-10:00,Independent Study,,,,,ALL\nLesson,Pre-Algebra,Sample Lesson,2026-11-30,,\"### Step-by-Step Example\\n$$2x + 4 = 10 || Original equation$$\\n$$2x = 6 || Subtract 4 from both sides$$\\n$$x = 3 || Divide both sides by 2$$\",mcq,2 | 3 | 4 | 5,1,Quick Check: What is x?,,__sandbox_tester__\nAssignment,Pre-Algebra,Mon 11/30 Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10 REQUIRE_UPLOAD,,__sandbox_tester__";
+      const sample = "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo\nSchedule,Pre-Algebra,Pre-Algebra Block,Monday,09:00-10:00,Independent Study,,,,,stu_1\nLesson,Pre-Algebra,Sample Lesson,2026-11-30,,\"### Step-by-Step Example\\n$$2x + 4 = 10 || Original equation$$\\n$$2x = 6 || Subtract 4 from both sides$$\\n$$x = 3 || Divide both sides by 2$$\",mcq,2 | 3 | 4 | 5,1,Quick Check: What is x?,,__sandbox_tester__\nAssignment,Pre-Algebra,Mon 11/30 Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10 REQUIRE_UPLOAD,,__sandbox_tester__";
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([sample], { type: "text/csv;charset=utf-8;" })); a.download = "sunshine-homeschool-template.csv"; a.click();
     };
 
@@ -807,7 +814,7 @@
           if (rec === "schedule") {
             const [startTime = "09:00", endTime = "10:00"] = (timeOrType || "09:00-10:00").split("-").map(s => s.trim());
             const idx = itemId ? appState.schedule.findIndex(s => s.id === itemId) : -1;
-            const obj = { id: idx !== -1 ? itemId : ("sch_" + Date.now() + "_" + i), day: dateOrDay || "Monday", startTime, endTime, title: title || "Study Block", category: content || "Independent Study", subject: subj };
+            const obj = { id: idx !== -1 ? itemId : ("sch_" + Date.now() + "_" + i), studentId: (assignedRaw || "").trim() || "ALL", day: dateOrDay || "Monday", startTime, endTime, title: title || "Study Block", category: content || "Independent Study", subject: subj };
             if (idx !== -1) appState.schedule[idx] = obj; else appState.schedule.push(obj);
             sCount++;
           } else if (rec === "lesson") {
@@ -853,7 +860,7 @@
 
     function buildMasterAnnualReviewHTML(stu, metrics) {
       const books = (appState.readingLogs || []).filter(r => r.studentId === stu.id), acts = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
-      return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${stu.name} Annual Review</title><style>body{font-family:Georgia,serif;max-width:840px;margin:24px auto;padding:0 20px;color:#1e293b}table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}th{background:#f1f5f9}</style></head><body><h1 style="border-bottom:3px solid #E67635;padding-bottom:10px">${stu.name} — Annual Evaluation Portfolio (${appState.settings.schoolYear})</h1><p><strong>Grade:</strong> ${stu.gradeLevel} | <strong>Cumulative GPA:</strong> ${metrics.cumulativeGpa} | <strong>Books Read:</strong> ${books.length} | <strong>Service/Activity Hours:</strong> ${acts.reduce((s,a)=>s+Number(a.hours||0),0).toFixed(1)}</p><h2>Subject Summary</h2><table><thead><tr><th>Subject</th><th>Syllabus</th><th>Graded</th><th>Score</th></tr></thead><tbody>${Object.entries(metrics.subjectStats).map(([s,st])=>`<tr><td><strong>${s}</strong></td><td>${appState.settings.subjectDetails?.[s]?.syllabus||""}</td><td>${st.count}</td><td>${st.earned}/${st.total}</td></tr>`).join("")}</tbody></table><h2>Completed Lessons (${metrics.completedLessons.length})</h2><table><thead><tr><th>Subject</th><th>Title</th><th>Completed</th></tr></thead><tbody>${metrics.completedLessons.map(l=>`<tr><td>${l.subject}</td><td>${l.title}</td><td>${new Date(l.completedBy[stu.id]).toLocaleDateString()}</td></tr>`).join("")}</tbody></table><h2>Reading Log (${books.length})</h2><table><thead><tr><th>Title</th><th>Author</th><th>Pages</th><th>Reflection</th></tr></thead><tbody>${books.map(b=>`<tr><td>${b.title}</td><td>${b.author}</td><td>${b.pages}</td><td>${b.reflection}</td></tr>`).join("")}</tbody></table><h2>Activity & Service Hours</h2><table><thead><tr><th>Date</th><th>Organization</th><th>Description</th><th>Hours</th></tr></thead><tbody>${acts.map(a=>`<tr><td>${a.date}</td><td>${a.organization}</td><td>${a.description}</td><td>${a.hours}</td></tr>`).join("")}</tbody></table><div style="margin-top:40px;display:flex;justify-content:space-between"><span>Educator: _______________________</span><span>Evaluator: _______________________</span></div></body></html>`;
+      return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${stu.name} Annual Review</title><style>body{font-family:Georgia,serif;max-width:840px;margin:24px auto;padding:0 20px;color:#1e293b}table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}th,td{border:1px solid #cbd5e1;padding:8px;text-align:left}th{background:#f1f5f9}</style></head><body><h1 style="border-bottom:3px solid #E67635;padding-bottom:10px">${stu.name} — Annual Evaluation Portfolio (${appState.settings.schoolYear})</h1><p><strong>Grade:</strong> ${stu.gradeLevel} | <strong>Overall Average:</strong> ${metrics.overallAvgPct !== null ? metrics.overallAvgPct + '%' : '—'} | <strong>Cumulative GPA:</strong> ${metrics.cumulativeGpa} | <strong>Books Read:</strong> ${books.length} | <strong>Service/Activity Hours:</strong> ${acts.reduce((s,a)=>s+Number(a.hours||0),0).toFixed(1)}</p><h2>Subject Progress &amp; Grade Summary</h2><table><thead><tr><th>Subject</th><th>Syllabus</th><th>Completed / Total</th><th>Points</th><th>Grade</th></tr></thead><tbody>${Object.entries(metrics.subjectStats).map(([s,st])=>`<tr><td><strong>${s}</strong></td><td>${appState.settings.subjectDetails?.[s]?.syllabus||""}</td><td>${st.count} graded / ${st.todoCount} remaining</td><td>${st.earned}/${st.total}</td><td><strong>${st.total>0?Math.round((st.earned/st.total)*100)+'%':'—'}</strong></td></tr>`).join("")}</tbody></table><h2>Completed Lessons (${metrics.completedLessons.length})</h2><table><thead><tr><th>Subject</th><th>Title</th><th>Completed</th></tr></thead><tbody>${metrics.completedLessons.map(l=>`<tr><td>${l.subject}</td><td>${l.title}</td><td>${new Date(l.completedBy[stu.id]).toLocaleDateString()}</td></tr>`).join("")}</tbody></table><h2>Reading Log (${books.length})</h2><table><thead><tr><th>Title</th><th>Author</th><th>Pages</th><th>Reflection</th></tr></thead><tbody>${books.map(b=>`<tr><td>${b.title}</td><td>${b.author}</td><td>${b.pages}</td><td>${b.reflection}</td></tr>`).join("")}</tbody></table><h2>Activity & Service Hours</h2><table><thead><tr><th>Date</th><th>Organization</th><th>Description</th><th>Hours</th></tr></thead><tbody>${acts.map(a=>`<tr><td>${a.date}</td><td>${a.organization}</td><td>${a.description}</td><td>${a.hours}</td></tr>`).join("")}</tbody></table><div style="margin-top:40px;display:flex;justify-content:space-between"><span>Educator: _______________________</span><span>Evaluator: _______________________</span></div></body></html>`;
     }
 
     window.downloadOrganizedAnnualReviewZip = async (stuId) => {
@@ -878,8 +885,10 @@
     window.openPrintablePortfolio = (kind, id, studentId) => { printableRecord = { kind, id, studentId: studentId || authenticatedStudentId }; render(); };
     window.closePrintablePortfolio = () => { printableRecord = null; render(); };
 
-    // Metrics (Chronologically sorted everywhere)
+    // Metrics & Subject-by-Subject Progress Report Calculator
     function percentToGpaPoints(pct) { return pct >= 90 ? 4 : pct >= 80 ? 3 : pct >= 70 ? 2 : pct >= 60 ? 1 : 0; }
+    function percentToLetter(pct) { if (pct === null) return "—"; if (pct >= 90) return "A"; if (pct >= 80) return "B"; if (pct >= 70) return "C"; if (pct >= 60) return "D"; return "F"; }
+
     function computeStudentMetrics(student) {
       const stuSubjects = getStudentSubjects(student);
       const myLessons = (appState.lessons || []).filter(l => isLessonVisibleToStudent(l, student.id)).sort((a,b) => (a.date||"9999-12-31").localeCompare(b.date||"9999-12-31"));
@@ -889,19 +898,125 @@
       const todoAssignments = myAssignments.filter(a => !subs[getSubKey(student.id, a.id)]);
       const inProgressAssignments = myAssignments.filter(a => subs[getSubKey(student.id, a.id)]?.status === "in_progress");
       const completedAssignments = myAssignments.filter(a => ["graded", "needs_review"].includes(subs[getSubKey(student.id, a.id)]?.status));
-      const subjectStats = {}; stuSubjects.forEach(s => subjectStats[s] = { earned: 0, total: 0, count: 0 });
+
+      const subjectStats = {};
+      stuSubjects.forEach(s => subjectStats[s] = { earned: 0, total: 0, count: 0, todoCount: 0, submittedItems: [], todoItems: [] });
       myAssignments.forEach(a => {
+        if (!subjectStats[a.subject]) subjectStats[a.subject] = { earned: 0, total: 0, count: 0, todoCount: 0, submittedItems: [], todoItems: [] };
         const sub = subs[getSubKey(student.id, a.id)];
+        const maxPts = a.questions.reduce((acc, q) => acc + Number(q.points || 0), 0);
         if (sub && ["graded", "needs_review"].includes(sub.status)) {
-          if (!subjectStats[a.subject]) subjectStats[a.subject] = { earned: 0, total: 0, count: 0 };
-          subjectStats[a.subject].earned += Number(sub.earnedPoints || 0); subjectStats[a.subject].total += Number(sub.totalPoints || 0); subjectStats[a.subject].count += 1;
+          subjectStats[a.subject].earned += Number(sub.earnedPoints || 0);
+          subjectStats[a.subject].total += Number(sub.totalPoints || maxPts);
+          subjectStats[a.subject].count += 1;
+          subjectStats[a.subject].submittedItems.push({ asg: a, sub });
+        } else {
+          subjectStats[a.subject].todoCount += 1;
+          subjectStats[a.subject].todoItems.push({ asg: a, status: sub?.status || "not_started" });
         }
       });
-      let gpaSum = 0, gradedSubj = 0, totalPointsEarned = 0;
-      Object.values(subjectStats).forEach(st => { totalPointsEarned += st.earned; if (st.total > 0) { gpaSum += percentToGpaPoints((st.earned / st.total) * 100); gradedSubj++; } });
+
+      let gpaSum = 0, pctSum = 0, gradedSubj = 0, totalPointsEarned = 0;
+      Object.values(subjectStats).forEach(st => {
+        totalPointsEarned += st.earned;
+        if (st.total > 0) {
+          const pct = (st.earned / st.total) * 100;
+          pctSum += pct;
+          gpaSum += percentToGpaPoints(pct);
+          gradedSubj++;
+        }
+      });
       const cumulativeGpa = gradedSubj > 0 ? (gpaSum / gradedSubj).toFixed(2) : "—";
+      const overallAvgPct = gradedSubj > 0 ? Math.round(pctSum / gradedSubj) : null;
       const totalTasks = myLessons.length + myAssignments.length, doneTasks = completedLessons.length + completedAssignments.length;
-      return { myLessons, myAssignments, completedLessons, todoAssignments, inProgressAssignments, completedAssignments, subjectStats, cumulativeGpa, totalPointsEarned, overallProgressPct: totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0, totalTasks, doneTasks };
+      return { myLessons, myAssignments, completedLessons, todoAssignments, inProgressAssignments, completedAssignments, subjectStats, cumulativeGpa, overallAvgPct, totalPointsEarned, overallProgressPct: totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0, totalTasks, doneTasks };
+    }
+
+    // Shared Subject Progress Report Renderer (Used on BOTH Student Achievements & Parent Student Records)
+    function renderSubjectProgressReportCards(student, metrics, isParentView = false) {
+      const stuSubjects = getStudentSubjects(student);
+      return `
+        <div class="space-y-4">
+          <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-tealhub-600">Cumulative Academic Standing</span>
+              <h3 class="text-xl font-display font-extrabold text-ink mt-0.5">${student.name}'s Subject-by-Subject Progress Report</h3>
+            </div>
+            <div class="flex items-center gap-4">
+              <div class="px-4 py-2.5 rounded-2xl bg-tealhub-500 text-white text-center">
+                <span class="block text-[10px] font-bold uppercase text-white/80">Overall Grade</span>
+                <span class="text-2xl font-display font-extrabold">${metrics.overallAvgPct !== null ? `${metrics.overallAvgPct}% (${percentToLetter(metrics.overallAvgPct)})` : '—'}</span>
+              </div>
+              <div class="px-4 py-2.5 rounded-2xl bg-sage-50 border border-sage-100 text-center">
+                <span class="block text-[10px] font-bold uppercase text-sage-700">4.0 GPA</span>
+                <span class="text-2xl font-display font-extrabold text-sage-700">${metrics.cumulativeGpa}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            ${stuSubjects.map(subj => {
+              const st = metrics.subjectStats[subj] || { earned: 0, total: 0, count: 0, todoCount: 0, submittedItems: [], todoItems: [] };
+              const avg = st.total > 0 ? Math.round((st.earned / st.total) * 100) : null;
+              const letter = percentToLetter(avg);
+              return `
+                <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between space-y-4">
+                  <div>
+                    <div class="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
+                      <div>
+                        <h4 class="font-display font-extrabold text-lg text-ink">${subj}</h4>
+                        <p class="text-xs text-slate-500">${st.count} Submitted • ${st.todoCount} Remaining</p>
+                      </div>
+                      <div class="text-right">
+                        <span class="text-2xl font-display font-extrabold text-tealhub-600">${avg !== null ? `${avg}% (${letter})` : '—'}</span>
+                        <span class="block text-[11px] font-semibold text-slate-400">${st.earned} / ${st.total} pts</span>
+                      </div>
+                    </div>
+
+                    <div class="mt-3 space-y-2">
+                      <p class="text-[11px] font-extrabold uppercase text-sage-700">✓ Submitted &amp; Graded (${st.submittedItems.length})</p>
+                      ${st.submittedItems.length === 0 ? `<p class="text-xs text-slate-400 italic">No graded work yet.</p>` : ''}
+                      ${st.submittedItems.map(({ asg, sub }) => {
+                        const itemPct = sub.totalPoints > 0 ? Math.round((sub.earnedPoints / sub.totalPoints) * 100) : 0;
+                        const sk = getSubKey(student.id, asg.id);
+                        return `
+                          <div class="p-2.5 rounded-xl bg-sage-50/70 border border-sage-100 text-xs space-y-1">
+                            <div class="flex justify-between items-center gap-2">
+                              <span class="font-bold text-ink truncate">${asg.title}</span>
+                              <span class="font-extrabold text-sage-700 shrink-0">${sub.earnedPoints}/${sub.totalPoints} (${itemPct}%)</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                              <span class="text-[11px] text-slate-500">${sub.status === 'graded' ? 'Graded' : 'Awaiting Parent Review'}</span>
+                              ${isParentView
+                                ? `<button onclick="openSubmissionReview('${sk}')" class="text-[11px] font-bold text-tealhub-600 underline">Review / Feedback →</button>`
+                                : `<button onclick="openAssignment('${asg.id}')" class="text-[11px] font-bold text-tealhub-600 underline">View Work &amp; Feedback →</button>`}
+                            </div>
+                            ${sub.parentFeedback ? `<p class="text-[11px] text-amberwarm-600 font-semibold bg-amberwarm-50 px-2 py-1 rounded">💬 Teacher Note: ${sub.parentFeedback}</p>` : ''}
+                          </div>
+                        `;
+                      }).join("")}
+                    </div>
+
+                    <div class="mt-4 space-y-1.5">
+                      <p class="text-[11px] font-extrabold uppercase text-terracotta-500">⏳ Needs to be Submitted (${st.todoItems.length})</p>
+                      ${st.todoItems.length === 0 ? `<p class="text-xs text-emerald-700 font-semibold">All assigned work turned in! 🎉</p>` : ''}
+                      ${st.todoItems.slice(0, 4).map(({ asg, status }) => `
+                        <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-b-0">
+                          <span class="text-slate-700 truncate pr-2">${asg.title} <span class="text-[11px] text-slate-400">(Due ${asg.dueDate || 'N/A'})</span></span>
+                          ${!isParentView
+                            ? `<button onclick="openAssignment('${asg.id}')" class="text-[11px] font-bold text-terracotta-500 hover:underline shrink-0">${status === 'in_progress' ? 'Resume' : 'Start →'}</button>`
+                            : `<span class="text-[11px] text-slate-400 shrink-0">${status === 'in_progress' ? 'In Progress' : 'To-Do'}</span>`}
+                        </div>
+                      `).join("")}
+                      ${st.todoItems.length > 4 ? `<p class="text-[11px] text-slate-400 italic">+ ${st.todoItems.length - 4} more upcoming items...</p>` : ''}
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      `;
     }
 
     // Main Render
@@ -925,7 +1040,7 @@
 
     function renderStudentPortalShell() {
       const student = getStudentById(authenticatedStudentId), metrics = computeStudentMetrics(student), pending = metrics.todoAssignments.length + metrics.inProgressAssignments.length;
-      const nav = [{ id: "home", label: "Home" }, { id: "schedule", label: "Schedule" }, { id: "subjects", label: "Subjects" }, { id: "assignments", label: "Assignments", badge: pending }, { id: "resources", label: "Resources" }, { id: "portfolio", label: "My Achievements" }, { id: "reading", label: "Reading Log" }, { id: "activities", label: "Activities & Hours" }];
+      const nav = [{ id: "home", label: "Home" }, { id: "schedule", label: "Schedule" }, { id: "subjects", label: "Subjects" }, { id: "assignments", label: "Assignments", badge: pending }, { id: "resources", label: "Resources" }, { id: "portfolio", label: "Progress & Grades" }, { id: "reading", label: "Reading Log" }, { id: "activities", label: "Activities & Hours" }];
       return `
         ${parentUnlockedSession ? `<div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm"><span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing drafts safely—your student's real account stays untouched.</span><div class="flex gap-2"><button onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 font-bold">↺ Reset Test Progress</button><button onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 font-bold">Return to Parent Hub →</button></div></div>` : ''}
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-400/25">
@@ -946,55 +1061,68 @@
 
     function renderTabHome(student, metrics) {
       const themes = [{ bg: "bg-terracotta-500", bar: "bg-amberwarm-400", icon: "🧮" }, { bg: "bg-tealhub-500", bar: "bg-tealhub-500", icon: "🧪" }, { bg: "bg-sage-500", bar: "bg-sage-500", icon: "📖" }];
-      const subjs = getStudentSubjects(student).slice(0, 4), top3 = subjs.slice(0, 3), fourth = subjs[3] || subjs[0] || "General", anns = appState.settings.announcements || [];
-      // Uses exact chronological subject timeline (Week 1 Lesson -> Week 1 Homework -> Week 1 Quiz -> Week 2...)
+      // Deduplicate enrolled subjects and render ONLY the exact number of courses the student takes (never duplicating!)
+      const activeSubjects = Array.from(new Set(getStudentSubjects(student)));
+      const topThree = activeSubjects.slice(0, 3);
+      const extraSubjects = activeSubjects.slice(3); // Only populated if student has 4+ courses
+      const anns = appState.settings.announcements || [];
+
       const getTasks = (s) => getChronologicalTimelineForSubject(s, metrics.myLessons, metrics.myAssignments).map(item => {
         if (item.kind === "lesson") return { kind: "lesson", id: item.data.id, title: item.data.title, done: isLessonCompletedBy(item.data, student.id) };
         const st = (appState.submissions || {})[getSubKey(student.id, item.data.id)]?.status;
         return { kind: "assignment", id: item.data.id, title: item.data.title, done: ["graded", "needs_review"].includes(st) };
       });
-      const fourthTasks = getTasks(fourth);
+
       return `
         ${anns.length ? `<div class="mb-5 bg-white/90 rounded-2xl px-5 py-3.5 border border-white shadow-sm flex justify-between text-xs sm:text-sm"><div><span class="px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 font-extrabold mr-2">📣 NOTE</span><strong>${anns[0].title}:</strong> ${anns[0].body}</div><span class="text-slate-400">${anns[0].date}</span></div>` : ''}
         <div class="grid lg:grid-cols-12 gap-6 items-start">
           <div class="lg:col-span-8 space-y-5">
             <h2 class="font-display font-extrabold text-xl sm:text-2xl text-ink">“My Day” Checklist</h2>
-            <div class="grid sm:grid-cols-3 gap-4">
-              ${top3.map((subj, idx) => {
+            <div class="grid sm:grid-cols-${Math.min(3, Math.max(1, topThree.length))} gap-4">
+              ${topThree.map((subj, idx) => {
                 const th = themes[idx % 3], tasks = getTasks(subj), done = tasks.filter(t => t.done).length, pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0, next = tasks.find(t => !t.done) || tasks[0];
                 return `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between"><div><div class="${th.bg} px-4 py-3.5 text-white flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl">${th.icon}</div><h3 class="font-display font-extrabold text-base leading-tight">${subj}</h3></div><div class="p-4 space-y-2.5">${tasks.slice(0,4).map(t => `<label class="flex items-start gap-2.5 text-xs sm:text-sm text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No tasks today.</p>'}</div></div><div class="px-4 pb-4 pt-1 space-y-3">${next ? `<div class="text-center"><button onclick="${next.kind === 'lesson' ? `openLesson('${next.id}')` : `openAssignment('${next.id}')`}" class="px-6 py-1.5 rounded-full bg-sage-500 text-white font-display font-bold text-xs">${next.done ? 'Review' : 'Start'}</button></div>` : ''}<div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div class="${th.bar} h-full" style="width:${pct}%"></div></div></div></div>`;
               }).join("")}
             </div>
+
             <div class="grid sm:grid-cols-12 gap-4">
-              <div class="sm:col-span-7 bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
-                <div class="bg-sage-500 px-5 py-3 text-white flex items-center gap-3"><span>📚</span><h3 class="font-display font-extrabold text-base">${fourth}</h3></div>
-                <div class="p-4 grid sm:grid-cols-2 gap-3 items-center">
-                  <div class="space-y-2">${fourthTasks.slice(0,3).map(t => `<label class="flex items-start gap-2 text-xs text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No pending tasks.</p>'}</div>
-                  <div class="flex flex-col items-center justify-center gap-2 border-t sm:border-t-0 sm:border-l border-slate-100 pt-3 sm:pt-0"><button onclick="selectStudentSubject('${fourth}'); setStudentTab('subjects');" class="px-6 py-2 rounded-full bg-sage-500 text-white font-display font-bold text-xs">Start</button><span class="text-[11px] text-slate-500">Open Course Syllabus</span></div>
-                </div>
-              </div>
-              <div class="sm:col-span-5 bg-amberwarm-400 rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
+              ${extraSubjects.map(extraSubj => {
+                const extraTasks = getTasks(extraSubj);
+                return `
+                  <div class="sm:col-span-7 bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
+                    <div class="bg-sage-500 px-5 py-3 text-white flex items-center gap-3"><span>📚</span><h3 class="font-display font-extrabold text-base">${extraSubj}</h3></div>
+                    <div class="p-4 grid sm:grid-cols-2 gap-3 items-center">
+                      <div class="space-y-2">${extraTasks.slice(0,3).map(t => `<label class="flex items-start gap-2 text-xs text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No pending tasks.</p>'}</div>
+                      <div class="flex flex-col items-center justify-center gap-2 border-t sm:border-t-0 sm:border-l border-slate-100 pt-3 sm:pt-0"><button onclick="selectStudentSubject('${extraSubj}'); setStudentTab('subjects');" class="px-6 py-2 rounded-full bg-sage-500 text-white font-display font-bold text-xs">Start</button><span class="text-[11px] text-slate-500">Open Course Syllabus</span></div>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+
+              <div class="${extraSubjects.length ? 'sm:col-span-5' : 'sm:col-span-12'} bg-amberwarm-400 rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
                 <div class="bg-terracotta-500 px-4 py-2.5 text-white font-display font-extrabold text-sm">Break Timer</div>
                 <div class="p-4 flex items-center justify-between gap-3"><div class="w-14 h-14 rounded-2xl bg-white/85 flex items-center justify-center text-3xl">🐕</div><div class="text-right flex-1"><p class="text-[11px] font-bold text-ink/80">Take a Brain Break!</p><p id="break-timer-display" class="font-display font-extrabold text-3xl text-ink my-0.5">${formatTimer(breakTimerSeconds)}</p><div class="flex justify-end gap-1.5"><button onclick="toggleBreakTimer()" class="px-3 py-1 rounded-full bg-ink text-white text-[11px] font-bold">${breakTimerRunning ? 'Pause' : 'Start'}</button><button onclick="resetBreakTimer()" class="px-2.5 py-1 rounded-full bg-white/80 text-ink text-[11px] font-bold">Reset</button></div></div></div>
               </div>
             </div>
           </div>
+
           <div class="lg:col-span-4 space-y-5">
             <h2 class="font-display font-extrabold text-xl sm:text-2xl text-ink">Quick Launchpad</h2>
             <div class="grid grid-cols-2 gap-3.5">
               <button onclick="setStudentTab('resources')" class="bg-terracotta-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">💻</div><span class="font-display font-extrabold text-xs">Google Drive<br>&amp; Classroom</span></button>
               <button onclick="setStudentTab('reading')" class="bg-tealhub-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📓</div><span class="font-display font-extrabold text-xs">My Digital<br>Notebook</span></button>
-              <button onclick="setStudentTab('portfolio')" class="bg-sage-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">🎨</div><span class="font-display font-extrabold text-xs">Art &amp; Project<br>Showcase</span></button>
+              <button onclick="setStudentTab('portfolio')" class="bg-sage-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📊</div><span class="font-display font-extrabold text-xs">Progress Report<br>&amp; Grades</span></button>
               <button onclick="setStudentTab('schedule')" class="rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center aspect-[4/3]" style="background: repeating-conic-gradient(#E67635 0% 25%, #338A94 0% 50%, #F7B552 0% 75%, #5D8A5E 0% 100%) 50% / 36px 36px;"><span class="px-3 py-1.5 rounded-xl bg-slate-900/80 text-white font-display font-extrabold text-xs">Google Calendar</span></button>
             </div>
-            <div><h2 class="font-display font-extrabold text-xl text-ink mb-3">Today’s Quest</h2><div class="bg-white rounded-3xl p-5 shadow-sm space-y-3"><div class="flex items-center gap-2.5"><span class="text-2xl">⭐</span><p class="font-display font-extrabold text-base text-ink">${metrics.doneTasks} out of ${metrics.totalTasks} tasks complete!</p></div><div class="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden"><div class="bg-tealhub-500 h-full" style="width:${metrics.overallProgressPct}%"></div></div><div class="flex justify-between text-xs font-bold"><span class="text-slate-700">🌟 Awesome job, ${student.name}!</span><span class="text-tealhub-600">${metrics.totalPointsEarned} pts</span></div></div></div>
+            <div><h2 class="font-display font-extrabold text-xl text-ink mb-3">Today’s Quest</h2><div class="bg-white rounded-3xl p-5 shadow-sm space-y-3"><div class="flex items-center gap-2.5"><span class="text-2xl">⭐</span><p class="font-display font-extrabold text-base text-ink">${metrics.doneTasks} out of ${metrics.totalTasks} tasks complete!</p></div><div class="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden"><div class="bg-tealhub-500 h-full" style="width:${metrics.overallProgressPct}%"></div></div><div class="flex justify-between text-xs font-bold"><span class="text-slate-700">🌟 Awesome job, ${student.name}!</span><span class="text-tealhub-600">${metrics.overallAvgPct !== null ? `Overall: ${metrics.overallAvgPct}%` : `${metrics.totalPointsEarned} pts`}</span></div></div></div>
           </div>
         </div>`;
     }
 
-    function renderTabSchedule() {
+    function renderTabSchedule(student) {
       const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-      return `<div class="space-y-6"><div class="bg-white rounded-3xl p-6 shadow-sm flex justify-between items-center"><div><h3 class="text-lg font-display font-extrabold text-ink">Weekly Schedule</h3><p class="text-xs text-slate-500">Sync blocks directly to Google Calendar.</p></div><button onclick="downloadScheduleICS()" class="px-4 py-2.5 rounded-xl bg-tealhub-500 text-white text-xs font-bold">📅 Export All (.ics)</button></div>${appState.settings.googleCalendarEmbedUrl ? `<div class="bg-white rounded-3xl p-5 shadow-sm"><iframe src="${appState.settings.googleCalendarEmbedUrl}" style="border:0" width="100%" height="420" frameborder="0" class="rounded-2xl"></iframe></div>` : ''}<div class="grid md:grid-cols-5 gap-4">${days.map(day => `<div class="bg-white rounded-3xl p-4 shadow-sm"><h4 class="font-display font-extrabold text-sm pb-2 mb-3 border-b">${day}</h4><div class="space-y-3">${(appState.schedule || []).filter(b => b.day === day).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")).map(b => `<div class="p-3 rounded-2xl border bg-slate-50 space-y-1"><p class="text-[11px] font-bold">${b.startTime} – ${b.endTime}</p><p class="font-bold text-xs">${b.title}</p><a href="${buildGoogleCalendarScheduleUrl(b)}" target="_blank" class="text-[11px] font-bold text-tealhub-600 underline">+ Google Cal ↗</a></div>`).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">Open</p>'}</div></div>`).join("")}</div></div>`;
+      const visibleBlocks = (appState.schedule || []).filter(b => isScheduleBlockVisibleToStudent(b, student.id));
+      return `<div class="space-y-6"><div class="bg-white rounded-3xl p-6 shadow-sm flex justify-between items-center"><div><h3 class="text-lg font-display font-extrabold text-ink">${student.name}'s Weekly Schedule</h3><p class="text-xs text-slate-500">Showing time blocks for your enrolled courses (${getStudentSubjects(student).join(", ")}).</p></div><button onclick="downloadScheduleICS('${student.id}')" class="px-4 py-2.5 rounded-xl bg-tealhub-500 text-white text-xs font-bold">📅 Export My Schedule (.ics)</button></div>${appState.settings.googleCalendarEmbedUrl ? `<div class="bg-white rounded-3xl p-5 shadow-sm"><iframe src="${appState.settings.googleCalendarEmbedUrl}" style="border:0" width="100%" height="420" frameborder="0" class="rounded-2xl"></iframe></div>` : ''}<div class="grid md:grid-cols-5 gap-4">${days.map(day => `<div class="bg-white rounded-3xl p-4 shadow-sm"><h4 class="font-display font-extrabold text-sm pb-2 mb-3 border-b">${day}</h4><div class="space-y-3">${visibleBlocks.filter(b => b.day === day).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")).map(b => `<div class="p-3 rounded-2xl border bg-slate-50 space-y-1"><p class="text-[11px] font-bold">${b.startTime} – ${b.endTime}</p><p class="font-bold text-xs">${b.title}</p><a href="${buildGoogleCalendarScheduleUrl(b)}" target="_blank" class="text-[11px] font-bold text-tealhub-600 underline">+ Google Cal ↗</a></div>`).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">Open</p>'}</div></div>`).join("")}</div></div>`;
     }
 
     function renderTabSubjects(student, metrics) {
@@ -1017,7 +1145,7 @@
     function renderTabAssignments(student, metrics) {
       const lists = { todo: [...metrics.todoAssignments].sort(compareAssignmentsChronological), in_progress: [...metrics.inProgressAssignments].sort(compareAssignmentsChronological), completed: [...metrics.completedAssignments].sort(compareAssignmentsChronological) };
       const activeList = lists[assignmentFilterTab] || [];
-      return `<div class="space-y-5"><div class="flex flex-wrap gap-2">${[{ id: "todo", label: "To-Do", count: lists.todo.length }, { id: "in_progress", label: "In Progress", count: lists.in_progress.length }, { id: "completed", label: "Completed", count: lists.completed.length }].map(t => `<button onclick="assignmentFilterTab='${t.id}'; render();" class="px-4 py-2 rounded-2xl text-xs font-bold ${assignmentFilterTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-white text-slate-600'}">${t.label} (${t.count})</button>`).join("")}</div><div class="space-y-4">${activeList.map(asg => { const sub = (appState.submissions || {})[getSubKey(student.id, asg.id)], isDone = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(asg); return `<div class="bg-white rounded-3xl p-6 shadow-sm flex flex-wrap justify-between items-center gap-4"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>${asg.strictMode ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-700">🔒 Strict Mode</span>` : ''}${reqUp ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600">📎 PDF / Work Upload Required</span>` : ''}</div><h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4><span class="text-xs text-slate-500">Due <strong>${asg.dueDate || 'N/A'}</strong></span></div><button onclick="openAssignment('${asg.id}')" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">${isDone ? `${sub.earnedPoints}/${sub.totalPoints} pts (View)` : 'Open'}</button></div>`; }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
+      return `<div class="space-y-5"><div class="flex flex-wrap gap-2">${[{ id: "todo", label: "To-Do", count: lists.todo.length }, { id: "in_progress", label: "In Progress", count: lists.in_progress.length }, { id: "completed", label: "Completed", count: lists.completed.length }].map(t => `<button onclick="assignmentFilterTab='${t.id}'; render();" class="px-4 py-2 rounded-2xl text-xs font-bold ${assignmentFilterTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-white text-slate-600'}">${t.label} (${t.count})</button>`).join("")}</div><div class="space-y-4">${activeList.map(asg => { const sub = (appState.submissions || {})[getSubKey(student.id, asg.id)], isDone = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(asg); return `<div class="bg-white rounded-3xl p-6 shadow-sm flex flex-wrap justify-between items-center gap-4"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>${asg.strictMode ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-700">🔒 Strict Mode</span>` : ''}${reqUp ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600">📎 PDF / Work Upload Required</span>` : ''}</div><h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4><span class="text-xs text-slate-500">Due <strong>${asg.dueDate || 'N/A'}</strong></span>${sub?.parentFeedback ? `<p class="text-xs text-amberwarm-600 font-semibold mt-1">💬 Teacher Feedback: ${sub.parentFeedback}</p>` : ''}</div><button onclick="openAssignment('${asg.id}')" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">${isDone ? `${sub.earnedPoints}/${sub.totalPoints} pts (View)` : 'Open'}</button></div>`; }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
     }
 
     function renderTabResources() {
@@ -1026,7 +1154,25 @@
 
     function renderTabPortfolio(student, metrics) {
       const myShowcase = (appState.portfolioShowcase || []).filter(p => p.studentId === student.id);
-      return `<div class="space-y-6"><div class="grid sm:grid-cols-4 gap-4"><div class="bg-tealhub-500 text-white rounded-3xl p-6"><p class="text-xs font-bold uppercase text-white/80">Cumulative GPA</p><p class="text-4xl font-display font-extrabold mt-2">${metrics.cumulativeGpa}</p></div>${Object.entries(metrics.subjectStats).map(([s, st]) => `<div class="bg-white rounded-3xl p-5"><p class="text-xs font-bold uppercase text-slate-400 truncate">${s}</p><p class="text-2xl font-display font-extrabold text-ink mt-2">${st.total > 0 ? Math.round((st.earned / st.total) * 100) + '%' : '—'}</p></div>`).join("")}</div><div class="grid lg:grid-cols-3 gap-6"><form onsubmit="addPortfolioShowcaseItem(event)" class="bg-white rounded-3xl p-6 space-y-3"><h4 class="font-display font-extrabold">+ Add Showcase Project</h4><select id="port_subject" class="w-full px-3 py-2 rounded-xl border text-xs">${getStudentSubjects(student).map(s => `<option>${s}</option>`).join("")}</select><input id="port_title" required placeholder="Title" class="w-full px-3 py-2 rounded-xl border text-xs" /><textarea id="port_desc" required rows="3" placeholder="Description" class="w-full px-3 py-2 rounded-xl border text-xs"></textarea><input id="port_link" placeholder="Google Drive URL (optional)" class="w-full px-3 py-2 rounded-xl border text-xs" /><button class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Pin to Showcase ★</button></form><div class="lg:col-span-2 space-y-3">${myShowcase.map(i => `<div class="bg-white rounded-3xl p-5"><span class="text-xs font-bold text-terracotta-500">★ ${i.subject}</span><h5 class="font-bold">${i.title}</h5><p class="text-sm text-slate-600">${i.description}</p></div>`).join("")}</div></div></div>`;
+      return `
+        <div class="space-y-8">
+          ${renderSubjectProgressReportCards(student, metrics, false)}
+
+          <div class="grid lg:grid-cols-3 gap-6">
+            <form onsubmit="addPortfolioShowcaseItem(event)" class="bg-white rounded-3xl p-6 space-y-3 h-fit shadow-sm">
+              <h4 class="font-display font-extrabold">+ Add Best Work to Showcase</h4>
+              <select id="port_subject" class="w-full px-3 py-2 rounded-xl border text-xs">${getStudentSubjects(student).map(s => `<option>${s}</option>`).join("")}</select>
+              <input id="port_title" required placeholder="Project Title" class="w-full px-3 py-2 rounded-xl border text-xs" />
+              <textarea id="port_desc" required rows="3" placeholder="What did you create or learn?" class="w-full px-3 py-2 rounded-xl border text-xs"></textarea>
+              <input id="port_link" placeholder="Google Drive URL (optional)" class="w-full px-3 py-2 rounded-xl border text-xs" />
+              <button class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Pin to Showcase ★</button>
+            </form>
+            <div class="lg:col-span-2 space-y-3">
+              <h4 class="font-display font-extrabold text-ink">Pinned Portfolio Projects (${myShowcase.length})</h4>
+              ${myShowcase.map(i => `<div class="bg-white rounded-3xl p-5 shadow-sm"><span class="text-xs font-bold text-terracotta-500">★ ${i.subject}</span><h5 class="font-bold">${i.title}</h5><p class="text-sm text-slate-600">${i.description}</p></div>`).join("") || '<p class="text-xs text-slate-500 bg-white rounded-2xl p-5">No showcase projects pinned yet.</p>'}
+            </div>
+          </div>
+        </div>`;
     }
 
     function renderTabReadingLog(student) {
@@ -1060,13 +1206,31 @@
       const asg = (appState.assignments || []).find(a => a.id === id); if (!asg) return "";
       const sub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)], isSub = sub && ["graded", "needs_review"].includes(sub.status), saved = sub?.answers || {}, reqUp = isWorkUploadRequired(asg);
       if (asg.strictMode && !isSub && !strictSession.unlockedStarted) {
-        return `<div class="max-w-lg mx-auto bg-white rounded-3xl p-8 border-2 border-slate-900 text-center my-8"><div class="text-3xl mb-3">🔒</div><h2 class="text-2xl font-display font-extrabold">${asg.title}</h2><p class="text-sm text-slate-600 my-4">Requires Full-Screen Focus Mode. Tab switches will pause the test.</p><div class="flex gap-3"><button onclick="closeStudentDetailView()" class="flex-1 py-3 rounded-xl border font-bold text-sm">Cancel</button><button onclick="startStrictFullScreen('${asg.id}')" class="flex-1 py-3 rounded-xl bg-ink text-white font-bold text-sm">Begin Test</button></div></div>`;
+        return `<div class="max-w-lg mx-auto bg-white rounded-3xl p-8 border-2 border-slate-900 text-center my-8"><div class="text-3xl mb-3">🔒</div><h2 class="text-2xl font-display font-extrabold">${asg.title}</h2><p class="text-sm text-slate-600 my-4">Requires Full-Screen Focus Mode. Tab switches will pause the test (file uploads are permitted).</p><div class="flex gap-3"><button onclick="closeStudentDetailView()" class="flex-1 py-3 rounded-xl border font-bold text-sm">Cancel</button><button onclick="startStrictFullScreen('${asg.id}')" class="flex-1 py-3 rounded-xl bg-ink text-white font-bold text-sm">Begin Test</button></div></div>`;
       }
       return `
         <div class="max-w-3xl mx-auto ${asg.strictMode && !isSub ? 'strict-locked-content' : ''}">
           <div class="flex justify-between mb-6">${!asg.strictMode || isSub ? `<button onclick="closeStudentDetailView()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">← Back to Hub</button>` : `<span class="text-xs font-bold text-red-600 bg-white px-3 py-1.5 rounded-full">🔒 Focus Monitoring Active</span>`}</div>
-          <div class="bg-white rounded-3xl p-6 shadow-sm mb-6"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span><h1 class="text-2xl font-display font-extrabold mt-1">${asg.title}</h1>${isSub ? `<div class="mt-4 p-4 rounded-2xl bg-sage-50 flex justify-between items-center"><span class="font-bold text-sage-700">Score</span><span class="text-2xl font-extrabold">${sub.earnedPoints} / ${sub.totalPoints}</span></div>` : ''}</div>
-          <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6 shadow-sm"><div class="flex justify-between gap-4 mb-3"><p class="font-semibold"><span class="text-tealhub-600 font-extrabold mr-1">${idx+1}.</span> ${formatMathOption(q.prompt)}</p><span class="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg shrink-0">${q.points} pts</span></div>${q.type==="mcq"?`<div class="space-y-2">${q.options.map((o,oi)=>`<label class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer"><input type="radio" name="ans_${q.id}" value="${oi}" ${String(saved[q.id]??"")===String(oi)?'checked':''} ${isSub?'disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>`:q.type==="tf"?`<div class="flex gap-3">${["True","False"].map(v=>`<label class="flex-1 p-3 rounded-xl border flex justify-center gap-2"><input type="radio" name="ans_${q.id}" value="${v}" ${saved[q.id]===v?'checked':''} ${isSub?'disabled':''}/>${v}</label>`).join("")}</div>`:q.type==="fill"?`<input id="ans_${q.id}" value="${(saved[q.id]||"").replace(/"/g,'&quot;')}" ${isSub?'disabled':''} class="w-full px-4 py-2.5 rounded-xl border text-sm"/>`:`<textarea id="ans_${q.id}" rows="4" ${isSub?'disabled':''} class="w-full px-4 py-3 rounded-xl border text-sm">${saved[q.id]||""}</textarea>`}</div>`).join("")}</div>
+          <div class="bg-white rounded-3xl p-6 shadow-sm mb-6">
+            <span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>
+            <h1 class="text-2xl font-display font-extrabold mt-1">${asg.title}</h1>
+            ${isSub ? `
+              <div class="mt-4 p-4 rounded-2xl bg-sage-50 flex justify-between items-center">
+                <div>
+                  <span class="font-bold text-sage-700 block">Score Summary</span>
+                  <span class="text-xs text-slate-600">${sub.status === 'graded' ? 'Graded & Finalized' : 'Submitted — Awaiting Parent Review'}</span>
+                </div>
+                <span class="text-2xl font-extrabold">${sub.earnedPoints} / ${sub.totalPoints} (${sub.totalPoints > 0 ? Math.round((sub.earnedPoints/sub.totalPoints)*100) : 0}%)</span>
+              </div>
+              ${sub.parentFeedback ? `
+                <div class="mt-3 p-4 rounded-2xl bg-amberwarm-50 border border-amberwarm-400/50">
+                  <p class="text-xs font-extrabold uppercase text-amberwarm-600 mb-1">💬 Parent / Teacher Feedback</p>
+                  <p class="text-sm text-ink font-medium">${sub.parentFeedback}</p>
+                </div>
+              ` : ''}
+            ` : ''}
+          </div>
+          <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6 shadow-sm"><div class="flex justify-between gap-4 mb-3"><p class="font-semibold"><span class="text-tealhub-600 font-extrabold mr-1">${idx+1}.</span> ${formatMathOption(q.prompt)}</p><span class="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg shrink-0">${isSub ? `${sub.questionScores?.[q.id]??0} / ${q.points} pts` : `${q.points} pts`}</span></div>${q.type==="mcq"?`<div class="space-y-2">${q.options.map((o,oi)=>`<label class="flex items-center gap-3 p-3 rounded-xl border ${isSub && String(oi)===String(q.correctAnswer) ? 'border-emerald-500 bg-emerald-50/50' : ''} cursor-pointer"><input type="radio" name="ans_${q.id}" value="${oi}" ${String(saved[q.id]??"")===String(oi)?'checked':''} ${isSub?'disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>`:q.type==="tf"?`<div class="flex gap-3">${["True","False"].map(v=>`<label class="flex-1 p-3 rounded-xl border flex justify-center gap-2"><input type="radio" name="ans_${q.id}" value="${v}" ${saved[q.id]===v?'checked':''} ${isSub?'disabled':''}/>${v}</label>`).join("")}</div>`:q.type==="fill"?`<input id="ans_${q.id}" value="${(saved[q.id]||"").replace(/"/g,'&quot;')}" ${isSub?'disabled':''} class="w-full px-4 py-2.5 rounded-xl border text-sm"/>`:`<textarea id="ans_${q.id}" rows="4" ${isSub?'disabled':''} class="w-full px-4 py-3 rounded-xl border text-sm">${saved[q.id]||""}</textarea>`}</div>`).join("")}</div>
 
           ${(asg.allowProjectLink || reqUp) ? `
             <div class="mt-5 bg-white rounded-3xl p-6 shadow-sm border ${reqUp ? 'border-amberwarm-400' : 'border-white'} space-y-3">
@@ -1076,10 +1240,10 @@
               </div>
               ${!isSub ? `
                 <div class="flex flex-wrap items-center gap-3">
-                  <label class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-ink text-xs font-bold cursor-pointer">
+                  <button type="button" onclick="triggerStudentWorkFilePicker()" class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-ink text-xs font-bold">
                     📄 Upload PDF / Photo
-                    <input type="file" accept=".pdf,image/*" onchange="handleStudentWorkFileUpload(event)" class="hidden" />
-                  </label>
+                  </button>
+                  <input type="file" id="student-work-file-input" accept=".pdf,image/*" onchange="handleStudentWorkFileUpload(event)" class="hidden" />
                   <span id="uploaded-file-badge" class="text-xs font-bold text-sage-700">${pendingUploadedWorkFile?.name || sub?.uploadedFileName ? `✓ Attached: ${pendingUploadedWorkFile?.name || sub?.uploadedFileName}` : 'No file selected'}</span>
                 </div>
                 <input type="url" id="asg_project_link_input" value="${(sub?.projectLink || '').replace(/"/g,'&quot;')}" placeholder="Or paste Google Drive / Docs share link (https://...)" class="w-full px-4 py-2.5 rounded-xl border text-sm" />
@@ -1130,8 +1294,20 @@
           ` : ''}
 
           ${parentTab === "student-records" ? (() => {
-            const stu = getStudentById(inspectedStudentId), metrics = computeStudentMetrics(stu), stuBooks = (appState.readingLogs || []).filter(r => r.studentId === stu.id), stuActs = (appState.activityLogs || []).filter(a => a.studentId === stu.id);
-            return `<div class="space-y-6"><div class="bg-slate-50 p-5 rounded-2xl border flex flex-wrap justify-between items-center gap-3"><div class="flex flex-wrap gap-2">${allStudents.map(s => `<button onclick="selectInspectedStudent('${s.id}')" class="px-4 py-2 rounded-xl text-xs font-extrabold ${inspectedStudentId === s.id ? 'bg-tealhub-500 text-white' : 'bg-white border'}">${s.name} (${s.gradeLevel})</button>`).join("")}</div><button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')" class="px-4 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-extrabold">📦 Download Annual Review Folder (.zip)</button></div><div class="flex flex-wrap gap-2">${[{ id: "overview", label: "📊 At-a-Glance" }, { id: "submissions", label: "📝 Submitted Work" }, { id: "lessons", label: "📖 Lessons" }, { id: "annual-export", label: "🗂️ Class Exports" }].map(st => `<button onclick="setStudentProfileSubTab('${st.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold ${studentProfileSubTab === st.id ? 'bg-ink text-white' : 'bg-slate-100'}">${st.label}</button>`).join("")}</div>${studentProfileSubTab === "overview" ? `<div class="grid sm:grid-cols-4 gap-4"><div class="p-5 rounded-2xl bg-tealhub-500 text-white"><p class="text-xs uppercase">GPA</p><p class="text-3xl font-extrabold mt-1">${metrics.cumulativeGpa}</p></div><div class="p-5 rounded-2xl bg-slate-50 border"><p class="text-xs uppercase">Completion</p><p class="text-3xl font-extrabold mt-1">${metrics.overallProgressPct}%</p></div><div class="p-5 rounded-2xl bg-slate-50 border"><p class="text-xs uppercase">Books Read</p><p class="text-3xl font-extrabold mt-1">${stuBooks.length}</p></div><div class="p-5 rounded-2xl bg-slate-50 border"><p class="text-xs uppercase">Hours</p><p class="text-3xl font-extrabold mt-1">${stuActs.reduce((s,a)=>s+Number(a.hours||0),0).toFixed(1)}</p></div></div>` : ''}${studentProfileSubTab === "submissions" ? `<div class="space-y-2">${metrics.myAssignments.map(a => { const sk = getSubKey(stu.id, a.id), sub = subs[sk]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${a.subject}</span><p class="font-bold text-sm">${a.title}</p>${sub?.violations?.length ? `<p class="text-xs text-red-600 font-bold">⚠ ${sub.violations.join("; ")}</p>` : ''}</div><div class="flex gap-2">${sub ? `<button onclick="reopenAssignmentSubmission('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button onclick="openSubmissionReview('${sk}')" class="px-3 py-1 rounded border text-xs font-bold">Review</button>` : '<span class="text-xs text-slate-400">Not Started</span>'}</div></div>`; }).join("")}</div>` : ''}${studentProfileSubTab === "lessons" ? `<div class="space-y-2">${metrics.myLessons.map(l => { const done = l.completedBy?.[stu.id]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${l.subject}</span><p class="font-bold text-sm">${l.title}</p></div><div>${done ? `<span class="text-xs font-bold text-emerald-700 mr-2">✓ Completed</span><button onclick="resetLessonCompletion('${l.id}','${stu.id}')" class="px-2.5 py-1 rounded border text-xs">↺ Reopen</button>` : '<span class="text-xs text-slate-400">Pending</span>'}</div></div>`; }).join("")}</div>` : ''}${studentProfileSubTab === "annual-export" ? `<div class="grid sm:grid-cols-2 gap-3">${getStudentSubjects(stu).map(subj => `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><strong>${subj}</strong><button onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold">🖨 Open / PDF</button></div>`).join("")}</div>` : ''}</div>`;
+            const stu = getStudentById(inspectedStudentId), metrics = computeStudentMetrics(stu);
+            return `<div class="space-y-6">
+              <div class="bg-slate-50 p-5 rounded-2xl border flex flex-wrap justify-between items-center gap-3">
+                <div class="flex flex-wrap gap-2">${allStudents.map(s => `<button onclick="selectInspectedStudent('${s.id}')" class="px-4 py-2 rounded-xl text-xs font-extrabold ${inspectedStudentId === s.id ? 'bg-tealhub-500 text-white' : 'bg-white border'}">${s.name} (${s.gradeLevel})</button>`).join("")}</div>
+                <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')" class="px-4 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-extrabold">📦 Download Annual Review Folder (.zip)</button>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                ${[{ id: "overview", label: "📊 Subject Progress Report" }, { id: "submissions", label: "📝 All Assignments" }, { id: "lessons", label: "📖 Lessons" }, { id: "annual-export", label: "🗂️ Class Exports" }].map(st => `<button onclick="setStudentProfileSubTab('${st.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold ${studentProfileSubTab === st.id ? 'bg-ink text-white' : 'bg-slate-100'}">${st.label}</button>`).join("")}
+              </div>
+              ${studentProfileSubTab === "overview" ? renderSubjectProgressReportCards(stu, metrics, true) : ''}
+              ${studentProfileSubTab === "submissions" ? `<div class="space-y-2">${metrics.myAssignments.map(a => { const sk = getSubKey(stu.id, a.id), sub = subs[sk]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${a.subject}</span><p class="font-bold text-sm">${a.title}</p>${sub?.violations?.length ? `<p class="text-xs text-red-600 font-bold">⚠ ${sub.violations.join("; ")}</p>` : ''}</div><div class="flex gap-2">${sub ? `<button onclick="reopenAssignmentSubmission('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button onclick="openSubmissionReview('${sk}')" class="px-3 py-1 rounded border text-xs font-bold">Review</button>` : '<span class="text-xs text-slate-400">Not Started</span>'}</div></div>`; }).join("")}</div>` : ''}
+              ${studentProfileSubTab === "lessons" ? `<div class="space-y-2">${metrics.myLessons.map(l => { const done = l.completedBy?.[stu.id]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${l.subject}</span><p class="font-bold text-sm">${l.title}</p></div><div>${done ? `<span class="text-xs font-bold text-emerald-700 mr-2">✓ Completed</span><button onclick="resetLessonCompletion('${l.id}','${stu.id}')" class="px-2.5 py-1 rounded border text-xs">↺ Reopen</button>` : '<span class="text-xs text-slate-400">Pending</span>'}</div></div>`; }).join("")}</div>` : ''}
+              ${studentProfileSubTab === "annual-export" ? `<div class="grid sm:grid-cols-2 gap-3">${getStudentSubjects(stu).map(subj => `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><strong>${subj}</strong><button onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold">🖨 Open / PDF</button></div>`).join("")}</div>` : ''}
+            </div>`;
           })() : ''}
 
           ${parentTab === "subjects-hub" ? `
@@ -1176,7 +1352,20 @@
 
           ${parentTab === "schedule-hub" ? `
             <div class="grid lg:grid-cols-2 gap-6">
-              <div class="bg-slate-50 p-6 rounded-2xl border space-y-4"><div class="flex justify-between"><h3 class="font-bold">📅 Weekly Schedule</h3><button onclick="downloadScheduleICS()" class="px-3 py-1 rounded-xl bg-tealhub-500 text-white text-xs font-bold">⬇ .ics</button></div><form onsubmit="addScheduleBlock(event)" class="grid grid-cols-2 gap-2 bg-white p-4 rounded-xl border"><select id="sch_day" class="px-2 py-1.5 rounded border text-xs"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select><select id="sch_category" class="px-2 py-1.5 rounded border text-xs"><option>Independent Study</option><option>Live Virtual Class</option><option>Extracurricular</option></select><input type="time" id="sch_start" value="09:00" class="px-2 py-1.5 rounded border text-xs"/><input type="time" id="sch_end" value="10:00" class="px-2 py-1.5 rounded border text-xs"/><input id="sch_title" required placeholder="Block Title" class="px-2 py-1.5 rounded border text-xs"/><select id="sch_subject" class="px-2 py-1.5 rounded border text-xs">${allSubjects.map(s=>`<option>${s}</option>`).join("")}<option>All Subjects</option></select><button class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">${editingScheduleId ? '✓ Update Block' : '+ Add Block'}</button></form><div class="space-y-2 max-h-60 overflow-y-auto">${(appState.schedule||[]).map(b=>`<div class="p-2.5 rounded-xl bg-white border flex justify-between text-xs"><span><strong>${b.day} ${b.startTime}-${b.endTime}:</strong> ${b.title}</span><div><button onclick="startEditScheduleBlock('${b.id}')" class="text-tealhub-600 font-bold mr-2">✎</button><button onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold">✕</button></div></div>`).join("")}</div></div>
+              <div class="bg-slate-50 p-6 rounded-2xl border space-y-4">
+                <div class="flex justify-between"><h3 class="font-bold">📅 Student Weekly Schedules</h3><button onclick="downloadScheduleICS()" class="px-3 py-1 rounded-xl bg-tealhub-500 text-white text-xs font-bold">⬇ .ics</button></div>
+                <form onsubmit="addScheduleBlock(event)" class="grid grid-cols-2 gap-2 bg-white p-4 rounded-xl border">
+                  <select id="sch_student" class="col-span-2 px-2 py-1.5 rounded border text-xs font-bold"><option value="ALL">Assign To: All Students (Matching Courses Only)</option>${realStudents.map(s=>`<option value="${s.id}">Assign To: ${s.name} (${s.gradeLevel})</option>`).join("")}</select>
+                  <select id="sch_day" class="px-2 py-1.5 rounded border text-xs"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select>
+                  <select id="sch_category" class="px-2 py-1.5 rounded border text-xs"><option>Independent Study</option><option>Live Virtual Class</option><option>Extracurricular</option></select>
+                  <input type="time" id="sch_start" value="09:00" class="px-2 py-1.5 rounded border text-xs"/>
+                  <input type="time" id="sch_end" value="10:00" class="px-2 py-1.5 rounded border text-xs"/>
+                  <input id="sch_title" required placeholder="Block Title" class="px-2 py-1.5 rounded border text-xs"/>
+                  <select id="sch_subject" class="px-2 py-1.5 rounded border text-xs">${allSubjects.map(s=>`<option>${s}</option>`).join("")}<option>All Subjects</option></select>
+                  <button class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">${editingScheduleId ? '✓ Update Block' : '+ Add Block'}</button>
+                </form>
+                <div class="space-y-2 max-h-60 overflow-y-auto">${(appState.schedule||[]).map(b=>`<div class="p-2.5 rounded-xl bg-white border flex justify-between text-xs"><span><strong>${b.day} ${b.startTime}-${b.endTime}:</strong> ${b.title} <span class="text-tealhub-600 font-bold">(${b.studentId && b.studentId !== 'ALL' ? (getStudentById(b.studentId)?.name || 'Student') : 'All'})</span></span><div><button onclick="startEditScheduleBlock('${b.id}')" class="text-tealhub-600 font-bold mr-2">✎</button><button onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold">✕</button></div></div>`).join("")}</div>
+              </div>
               <div class="space-y-6">
                 <form onsubmit="saveGoogleCalendarEmbed(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h3 class="font-bold">🔗 Embed Google Calendar</h3><input id="gcal_embed_input" value="${(appState.settings.googleCalendarEmbedUrl||'').replace(/"/g,'&quot;')}" placeholder="https://calendar.google.com/calendar/embed?src=..." class="w-full px-3 py-2 rounded-xl border text-xs bg-white"/><button class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold">Save Calendar Link</button></form>
                 <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h3 class="font-bold">📚 Course Syllabus &amp; Current Unit</h3><div class="flex flex-wrap gap-1.5">${allSubjects.map(s=>`<button type="button" onclick="selectParentSyllabusTab('${s}')" class="px-3 py-1 rounded-xl text-xs font-bold ${parentSyllabusSubject===s?'bg-tealhub-500 text-white':'bg-white border'}">${s}</button>`).join("")}</div><input id="syl_unit" value="${(activeSylObj.currentUnit||'').replace(/"/g,'&quot;')}" placeholder="Current Unit" class="w-full px-3 py-2 rounded-xl border text-xs bg-white font-bold"/><textarea id="syl_text" rows="3" placeholder="Syllabus overview..." class="w-full px-3 py-2 rounded-xl border text-xs bg-white">${activeSylObj.syllabus||''}</textarea><button class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">Save Syllabus ✓</button></form>
