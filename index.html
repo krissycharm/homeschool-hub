@@ -246,7 +246,7 @@
     let db = null;
     let dbRef = null;
     let auth = null;
-    let hasInitialCloudSync = !isFirebaseConfigured; // Prevents overwriting cloud data before initial snapshot loads
+    let hasInitialCloudSync = !isFirebaseConfigured;
     const googleProvider = new GoogleAuthProvider();
 
     if (isFirebaseConfigured) {
@@ -343,7 +343,7 @@
     // Parent Hub Tabs & Workspace States
     let parentTab = "overview";
     let parentSubjectTab = getAllConfiguredSubjects()[0] || "Pre-Algebra";
-    let parentSubjectEditorMode = null; // null | "lesson" | "assignment"
+    let parentSubjectEditorMode = null;
     let parentSyllabusSubject = getAllConfiguredSubjects()[0] || "Pre-Algebra";
     let parentStudentFilter = "All";
     let studentSearchQuery = "";
@@ -490,7 +490,6 @@
           updateHeaderChrome();
           render();
         } else {
-          // Only seed cloud database if remote is genuinely null AND we have local data
           set(dbRef, appState);
         }
       }, (error) => {
@@ -505,7 +504,6 @@
       onAuthStateChanged(auth, (user) => {
         if (user) {
           currentGoogleUser = user;
-          // Attach cloud listener FIRST so remote state loads before role resolution
           attachRealtimeListener();
           const allowed = resolveUserAccess(user);
           if (allowed) {
@@ -641,9 +639,7 @@
       return `${studentId}_${assignmentId}`;
     }
     function isLessonVisibleToStudent(lesson, studentId) {
-      // Teacher Sandbox sees all lessons (drafts + assigned) for testing
       if (studentId === SANDBOX_STUDENT_ID) return true;
-      // Real students NEVER see items still assigned only to Teacher Sandbox
       if (lesson.studentId === SANDBOX_STUDENT_ID) return false;
       return !lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId;
     }
@@ -940,8 +936,23 @@
     }
 
     // =========================================================================
-    // 8. ROLE SWITCHING, NAVIGATION, FILTERS & REVIEW CONTROLS
+    // 8. ALL GLOBAL UI NAVIGATION, FILTER, SUBJECT & EDITOR HANDLERS (WINDOW-BOUND)
     // =========================================================================
+    window.selectStudentSubject = function(subj) {
+      activeCourseSubject = subj;
+      render();
+    };
+
+    window.openSubjectFromHomeCard = function(subj) {
+      activeCourseSubject = subj;
+      setStudentTab("subjects");
+    };
+
+    window.setAssignmentFilterTab = function(filterId) {
+      assignmentFilterTab = filterId;
+      render();
+    };
+
     window.closeStudentDetailView = function() {
       exitStrictSessionCleanup();
       activeLessonId = null;
@@ -973,6 +984,30 @@
     window.setStudentProfileSubTab = function(subTab) {
       studentProfileSubTab = subTab;
       render();
+    };
+
+    window.openSubjectWorkspaceFromOverview = function(subj) {
+      parentSubjectTab = subj;
+      parentSubjectEditorMode = null;
+      parentTab = "subjects-hub";
+      render();
+    };
+
+    window.cancelSubjectEditor = function() {
+      parentSubjectEditorMode = null;
+      editingLessonId = null;
+      editingAssignmentId = null;
+      render();
+    };
+
+    window.openClassPortfolioWindow = function(stuId, subj) {
+      const stu = getStudentById(stuId);
+      const metrics = computeStudentMetrics(stu);
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.write(buildClassPortfolioHTML(stu, subj, metrics));
+        w.document.close();
+      }
     };
 
     window.updateStudentSearch = function(val) {
@@ -1360,7 +1395,7 @@
     };
 
     // =========================================================================
-    // 10. PARENT BUILDER, EDITORS, REOPEN, CSV IMPORT & ANNUAL REVIEW ZIP EXPORT
+    // 10. PARENT BUILDER, EDITORS, REOPEN, 2-WAY CSV SYNC & ANNUAL REVIEW ZIP
     // =========================================================================
     let builderQuestions = [
       { id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }
@@ -1754,7 +1789,15 @@
       saveState("Parent PIN & academic settings saved!");
     };
 
-    // --- CSV CURRICULUM IMPORTER & TEMPLATE DOWNLOADER ---
+    // --- 2-WAY CSV CURRICULUM EXPORT & SMART UPSERT IMPORTER ---
+    function csvEscape(val) {
+      const s = String(val ?? "");
+      if (s.includes('"') || s.includes(',') || s.includes('\n') || s.includes('\r')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
     function parseCSVRows(text) {
       const rows = [];
       let row = [], val = "", inQuotes = false;
@@ -1777,12 +1820,60 @@
       return rows;
     }
 
+    window.exportCurrentCurriculumCSV = function() {
+      const headers = [
+        "RecordType", "Subject", "Title", "DateOrDay", "SubTypeOrTime",
+        "ContentOrPrompt", "QuestionType", "Options", "CorrectAnswer", "PointsOrStrict", "ItemID", "AssignedTo"
+      ];
+      const out = [headers.join(",")];
+
+      (appState.schedule || []).forEach(b => {
+        out.push([
+          "Schedule", b.subject, b.title, b.day, `${b.startTime}-${b.endTime}`,
+          b.category, "", "", "", "", b.id, "ALL"
+        ].map(csvEscape).join(","));
+      });
+
+      (appState.lessons || []).forEach(l => {
+        const escapedContent = (l.content || "").replace(/\r?\n/g, "\\n");
+        const optsStr = (l.checkQuestion?.options || []).filter(Boolean).join(" | ");
+        const checkPrompt = l.checkQuestion?.enabled ? (l.checkQuestion.prompt || "") : "";
+        out.push([
+          "Lesson", l.subject, l.title, l.date || "", "",
+          escapedContent, l.checkQuestion?.enabled ? "mcq" : "", optsStr,
+          l.checkQuestion?.enabled ? String(l.checkQuestion.correctIndex ?? 0) : "",
+          checkPrompt, l.id, l.studentId || "stu_1"
+        ].map(csvEscape).join(","));
+      });
+
+      (appState.assignments || []).forEach(a => {
+        (a.questions || []).forEach(q => {
+          const optsStr = q.type === "mcq" && Array.isArray(q.options) ? q.options.join(" | ") : "";
+          const ptsStr = `${q.points || 10}${a.strictMode ? " STRICT" : ""}`;
+          out.push([
+            "Assignment", a.subject, a.title, a.dueDate || "", a.type || "Homework",
+            q.prompt || "", q.type || "mcq", optsStr, q.correctAnswer || "",
+            ptsStr, a.id, a.studentId || "stu_1"
+          ].map(csvEscape).join(","));
+        });
+      });
+
+      const blob = new Blob([out.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Sunshine_Homeschool_Live_Curriculum_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showSavedToast("Exported live curriculum CSV for Google Sheets / Excel!");
+    };
+
     window.downloadCurriculumCSVTemplate = function() {
       const sample = [
-        "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict",
-        'Schedule,Pre-Algebra,Pre-Algebra Morning Block,Monday,09:00-10:00,Independent Study,,,,',
-        'Lesson,Pre-Algebra,Week 1: Sample Lesson,2026-11-30,,"### Lesson Notes\\nWrite notes here.",mcq,Choice A | Choice B | Choice C | Choice D,1,Quick Check: Sample question?',
-        'Assignment,Pre-Algebra,Mon 11/30 Daily Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10'
+        "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo",
+        'Schedule,Pre-Algebra,Pre-Algebra Morning Block,Monday,09:00-10:00,Independent Study,,,,,ALL',
+        'Lesson,Pre-Algebra,Week 1: Sample Lesson,2026-11-30,,"### Lesson Notes\\nWrite notes here.",mcq,Choice A | Choice B | Choice C | Choice D,1,Quick Check: Sample question?,,__sandbox_tester__',
+        'Assignment,Pre-Algebra,Mon 11/30 Daily Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10,,__sandbox_tester__'
       ].join("\n");
       const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -1806,12 +1897,14 @@
         const defaultStu = appState.settings.students?.[0];
         const defaultStuId = defaultStu?.id || "stu_1";
         const assignmentMap = {};
-        let lessonsAdded = 0, schedulesAdded = 0, questionsAdded = 0;
+        let lessonsUpserted = 0, schedulesUpserted = 0, assignmentsUpserted = 0;
 
         for (let i = 1; i < rows.length; i++) {
-          const [recTypeRaw, subjRaw, title, dateOrDay, subTypeOrTime, contentOrPrompt, qTypeRaw, optsRaw, corrRaw, ptsRaw] = rows[i];
+          const [recTypeRaw, subjRaw, title, dateOrDay, subTypeOrTime, contentOrPrompt, qTypeRaw, optsRaw, corrRaw, ptsRaw, itemIdRaw, assignedToRaw] = rows[i];
           const recType = (recTypeRaw || "").toLowerCase();
           const subj = subjRaw || "General";
+          const itemId = (itemIdRaw || "").trim();
+          const targetStudent = (assignedToRaw || "").trim() || defaultStuId;
 
           if (subj && subj !== "All Subjects") {
             if (!appState.settings.subjects.includes(subj)) appState.settings.subjects.push(subj);
@@ -1822,54 +1915,65 @@
 
           if (recType === "schedule") {
             const [startTime = "09:00", endTime = "10:00"] = (subTypeOrTime || "09:00-10:00").split("-").map(s => s.trim());
-            appState.schedule.push({
-              id: "sch_" + Date.now() + "_" + i,
+            const existingIdx = itemId ? appState.schedule.findIndex(s => s.id === itemId) : -1;
+            const schObj = {
+              id: existingIdx !== -1 ? itemId : ("sch_" + Date.now() + "_" + i),
               day: dateOrDay || "Monday",
               startTime,
               endTime,
               title: title || "Study Block",
               category: contentOrPrompt || "Independent Study",
               subject: subj
-            });
-            schedulesAdded++;
+            };
+            if (existingIdx !== -1) appState.schedule[existingIdx] = schObj;
+            else appState.schedule.push(schObj);
+            schedulesUpserted++;
           } else if (recType === "lesson") {
             const opts = optsRaw ? optsRaw.split("|").map(s => s.trim()) : [];
             const hasCheck = Boolean(ptsRaw && opts.length >= 2);
-            appState.lessons.unshift({
-              id: "les_" + Date.now() + "_" + i,
-              studentId: defaultStuId,
+            const existingIdx = itemId ? appState.lessons.findIndex(l => l.id === itemId) : -1;
+            const existingLes = existingIdx !== -1 ? appState.lessons[existingIdx] : null;
+
+            const lesObj = {
+              id: existingLes ? existingLes.id : ("les_" + Date.now() + "_" + i),
+              studentId: existingLes ? (assignedToRaw ? targetStudent : existingLes.studentId) : targetStudent,
               subject: subj,
               title: title || "Untitled Lesson",
               date: dateOrDay || new Date().toISOString().slice(0, 10),
               content: (contentOrPrompt || "").replace(/\\n/g, "\n"),
-              youtubeUrl: "",
-              resourceLink: "",
-              imageUrl: "",
+              youtubeUrl: existingLes?.youtubeUrl || "",
+              resourceLink: existingLes?.resourceLink || "",
+              imageUrl: existingLes?.imageUrl || "",
               checkQuestion: {
                 enabled: hasCheck,
                 prompt: hasCheck ? ptsRaw : "",
                 options: hasCheck ? [opts[0] || "", opts[1] || "", opts[2] || "", opts[3] || ""] : ["", "", "", ""],
                 correctIndex: Number(corrRaw) || 0
               },
-              completedBy: {}
-            });
-            lessonsAdded++;
+              completedBy: existingLes?.completedBy || {},
+              checkPassedBy: existingLes?.checkPassedBy || {}
+            };
+
+            if (existingIdx !== -1) appState.lessons[existingIdx] = lesObj;
+            else appState.lessons.unshift(lesObj);
+            lessonsUpserted++;
           } else if (recType === "assignment") {
-            const key = `${subj}||${title}||${dateOrDay}`;
+            const key = itemId ? `ID:${itemId}` : `${subj}||${title}||${dateOrDay}`;
             const strictFlag = (ptsRaw || "").toUpperCase().includes("STRICT");
             const ptsNum = parseInt((ptsRaw || "10").replace(/\D/g, ""), 10) || 10;
 
             if (!assignmentMap[key]) {
+              const existingAsg = itemId ? appState.assignments.find(a => a.id === itemId) : null;
               assignmentMap[key] = {
-                id: "asg_" + Date.now() + "_" + i,
-                studentId: defaultStuId,
+                id: existingAsg ? existingAsg.id : ("asg_" + Date.now() + "_" + i),
+                studentId: existingAsg ? (assignedToRaw ? targetStudent : existingAsg.studentId) : targetStudent,
                 subject: subj,
                 title: title || "Untitled Assignment",
                 type: subTypeOrTime || "Homework",
                 dueDate: dateOrDay || new Date().toISOString().slice(0, 10),
-                linkedLessonId: "",
+                linkedLessonId: existingAsg?.linkedLessonId || "",
                 strictMode: strictFlag,
-                allowProjectLink: true,
+                allowProjectLink: existingAsg?.allowProjectLink ?? true,
                 questions: []
               };
             } else if (strictFlag) {
@@ -1886,15 +1990,19 @@
                 options: qType === "mcq" && optsRaw ? optsRaw.split("|").map(s => s.trim()) : [],
                 correctAnswer: corrRaw || ""
               });
-              questionsAdded++;
             }
           }
         }
 
-        const newAssignments = Object.values(assignmentMap);
-        appState.assignments.unshift(...newAssignments);
+        Object.values(assignmentMap).forEach(asgObj => {
+          const existingIdx = appState.assignments.findIndex(a => a.id === asgObj.id);
+          if (existingIdx !== -1) appState.assignments[existingIdx] = asgObj;
+          else appState.assignments.unshift(asgObj);
+          assignmentsUpserted++;
+        });
+
         event.target.value = "";
-        saveState(`Imported ${lessonsAdded} lessons, ${newAssignments.length} assignments (${questionsAdded} Qs), & ${schedulesAdded} schedule blocks!`);
+        saveState(`Synced ${lessonsUpserted} lessons, ${assignmentsUpserted} assignments, & ${schedulesUpserted} schedule blocks!`);
       };
       reader.readAsText(file);
     };
@@ -2529,7 +2637,7 @@
                     `).join("")}
                   </div>
                   <div class="flex flex-col items-center justify-center gap-2 border-t sm:border-t-0 sm:border-l border-slate-100 pt-3 sm:pt-0 sm:pl-3">
-                    <button onclick="activeCourseSubject='${fourthSubject}'; setStudentTab('subjects');"
+                    <button onclick="openSubjectFromHomeCard('${fourthSubject}')"
                       class="px-6 py-2 rounded-full bg-sage-500 hover:bg-sage-600 text-white font-display font-bold text-xs shadow-sm transition">
                       Start
                     </button>
@@ -2731,7 +2839,7 @@
               const stat = metrics.subjectStats[subj];
               const pct = stat && stat.total > 0 ? Math.round((stat.earned / stat.total) * 100) + "%" : "";
               return `
-                <button onclick="activeCourseSubject='${subj}'; render();"
+                <button onclick="selectStudentSubject('${subj}')"
                   class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm transition flex items-center justify-between ${
                     activeCourseSubject === subj
                       ? 'bg-tealhub-500 text-white shadow-sm'
@@ -2840,7 +2948,7 @@
               { id: "in_progress", label: "In Progress (Saved)", count: metrics.inProgressAssignments.length },
               { id: "completed", label: "Completed & Submitted", count: metrics.completedAssignments.length }
             ].map(t => `
-              <button onclick="assignmentFilterTab='${t.id}'; render();"
+              <button onclick="setAssignmentFilterTab('${t.id}')"
                 class="px-4 py-2 rounded-2xl text-xs font-bold transition flex items-center gap-2 ${
                   assignmentFilterTab === t.id
                     ? 'bg-tealhub-500 text-white shadow-sm'
@@ -3450,7 +3558,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // VIEW D: PARENT DASHBOARD (WRAPPED TABS — ZERO HORIZONTAL SCROLLING)
+    // VIEW D: PARENT DASHBOARD (WRAPPED TABS + 2-WAY CSV SYNC)
     // -------------------------------------------------------------------------
     function renderParentDashboard() {
       const subs = appState.submissions || {};
@@ -3476,18 +3584,21 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
               <h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2>
-              <p class="text-sm text-slate-500">Draft &amp; preview in Sandbox, manage individual student courses, gradebook, and Annual Review folders.</p>
+              <p class="text-sm text-slate-500">2-way Google Sheets/CSV sync, Sandbox drafting, individual student courses, and Annual Review folders.</p>
             </div>
             <div class="flex flex-wrap gap-2">
               <button onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 hover:bg-amberwarm-500 text-ink text-xs font-extrabold shadow-sm">
                 👁 Preview Student View
+              </button>
+              <button onclick="exportCurrentCurriculumCSV()" class="px-3.5 py-2 rounded-xl bg-sage-500 hover:bg-sage-600 text-white text-xs font-bold shadow-sm">
+                ⬇ Export Curriculum (CSV)
               </button>
               <label class="px-3.5 py-2 rounded-xl bg-tealhub-500 hover:bg-tealhub-600 text-white text-xs font-bold cursor-pointer shadow-sm">
                 ⬆ Import Curriculum (CSV)
                 <input type="file" accept=".csv" onchange="handleCurriculumCSVUpload(event)" class="hidden" />
               </label>
               <button onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
-                📄 CSV Template
+                📄 Blank Template
               </button>
               <button onclick="exportJSONBackup()" class="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100">
                 ⬇ Full Backup (JSON)
@@ -3570,7 +3681,7 @@
                 const lCount = (appState.lessons || []).filter(l => l.subject === subj).length;
                 const aCount = (appState.assignments || []).filter(a => a.subject === subj).length;
                 return `
-                  <div onclick="selectParentSubjectTab('${subj}'); parentTab='subjects-hub'; render();"
+                  <div onclick="openSubjectWorkspaceFromOverview('${subj}')"
                     class="p-5 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-white hover:shadow-sm cursor-pointer transition space-y-2">
                     <span class="text-xs font-bold uppercase text-tealhub-600">Course Workspace</span>
                     <h4 class="font-display font-extrabold text-base text-ink">${subj}</h4>
@@ -3792,7 +3903,7 @@
                               <span class="text-[10px] font-bold uppercase text-tealhub-600">Subject File</span>
                               <p class="font-bold text-sm text-ink">${subj}</p>
                             </div>
-                            <button onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();"
+                            <button onclick="openClassPortfolioWindow('${stu.id}', '${subj}')"
                               class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold shrink-0">
                               🖨 Open / PDF
                             </button>
@@ -3871,7 +3982,7 @@
                   <form onsubmit="publishNewLesson(event)" class="bg-slate-50/70 p-6 rounded-2xl border border-slate-200 space-y-5">
                     <div class="flex items-center justify-between">
                       <h4 class="text-lg font-display font-extrabold text-ink">${editingLessonId ? 'Edit Class Lesson' : `New ${parentSubjectTab} Lesson`}</h4>
-                      <button type="button" onclick="parentSubjectEditorMode=null; editingLessonId=null; render();" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
+                      <button type="button" onclick="cancelSubjectEditor()" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
                     </div>
                     <div class="grid sm:grid-cols-3 gap-4">
                       <div>
@@ -3961,7 +4072,7 @@
                   <form onsubmit="publishNewAssignment(event)" class="bg-slate-50/70 p-6 rounded-2xl border border-slate-200 space-y-6">
                     <div class="flex items-center justify-between">
                       <h4 class="text-lg font-display font-extrabold text-ink">${editingAssignmentId ? 'Edit Homework or Assessment' : `New ${parentSubjectTab} Homework / Quiz`}</h4>
-                      <button type="button" onclick="parentSubjectEditorMode=null; editingAssignmentId=null; render();" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
+                      <button type="button" onclick="cancelSubjectEditor()" class="text-xs font-bold text-slate-500 hover:underline">✕ Cancel</button>
                     </div>
 
                     <div class="grid sm:grid-cols-4 gap-4">
@@ -4772,11 +4883,6 @@
         </div>
       `;
     }
-
-    // Expose portfolio builders for Annual Review individual class printables
-    window.buildClassPortfolioHTML = buildClassPortfolioHTML;
-    window.getStudentById = getStudentById;
-    window.computeStudentMetrics = computeStudentMetrics;
 
     // Boot Application
     render();
