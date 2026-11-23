@@ -34,11 +34,11 @@
       background-image: radial-gradient(circle at 12% 18%, rgba(255,255,255,0.45) 0%, transparent 28%), radial-gradient(circle at 88% 82%, rgba(255,255,255,0.45) 0%, transparent 30%);
     }
     .strict-locked-content { -webkit-user-select: none; user-select: none; }
+    .katex-display { margin: 0.35em 0 !important; text-align: left !important; }
     @media print {
       body { background: #FFF !important; background-image: none !important; color: #000 !important; font-size: 11.5pt; }
       .no-print { display: none !important; }
       .print-container { box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; }
-      .page-break-inside-avoid { break-inside: avoid; }
     }
   </style>
 </head>
@@ -133,11 +133,7 @@
 
     const DEFAULT_STATE = {
       settings: {
-        schoolName: "Sunshine Homeschool",
-        schoolYear: "2026–2027",
-        parentPin: "1234",
-        readingGoalBooks: 20,
-        googleCalendarEmbedUrl: "",
+        schoolName: "Sunshine Homeschool", schoolYear: "2026–2027", parentPin: "1234", readingGoalBooks: 20, googleCalendarEmbedUrl: "",
         announcements: [{ id: "ann_1", date: "2026-11-30", title: "Welcome to Sunshine Homeschool!", body: "Check your daily spiral warm-ups and lessons each morning." }],
         subjects: [...DEFAULT_SUBJECTS],
         subjectDetails: {
@@ -152,7 +148,7 @@
       resources: [
         { id: "res_1", title: "Khan Academy — 8th Grade Math", category: "Math & Science", url: "https://www.khanacademy.org/math/cc-eighth-grade-math", notes: "Sign in with your Gmail account for mastery points." },
         { id: "res_2", title: "FLVS Student Portal (VSA)", category: "Virtual Courses", url: "https://login.flvs.net/", notes: "Check course announcements and DBA schedules." },
-        { id: "res_3", title: "Google Drive — My School Folder", category: "Google Workspace", url: "https://drive.google.com/", notes: "Store essays, slideshows, and project photos here." },
+        { id: "res_3", title: "Google Drive — My School Folder", category: "Google Workspace", url: "https://drive.google.com/", notes: "Store essays, slideshows, and scanned PDFs here." },
         { id: "res_4", title: "Google Docs — Essay & Notes", category: "Google Workspace", url: "https://docs.google.com/", notes: "Create and share written reports." },
         { id: "res_5", title: "Desmos Graphing Calculator", category: "Study Tools", url: "https://www.desmos.com/calculator", notes: "Use for graphing during homework (not permitted during Strict Tests)." }
       ],
@@ -171,6 +167,7 @@
     let breakTimerSeconds = 300, breakTimerRunning = false, breakTimerInterval = null;
     let strictSession = { active: false, assignmentId: null, studentId: null, unlockedStarted: false, pausedLocked: false, violations: [] };
     let builderQuestions = [{ id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
+    let pendingUploadedWorkFile = null; // Stores uploaded PDF/image data URL during active submission
 
     function showSavedToast(msg) {
       let toast = document.getElementById("cloud-save-toast");
@@ -231,10 +228,11 @@
         const remoteData = snapshot.val();
         hasInitialCloudSync = true;
         if (remoteData) {
+          const normalizedStu = normalizeStudents(remoteData.settings?.students);
           appState = {
             settings: {
               ...DEFAULT_STATE.settings, ...(remoteData.settings || {}),
-              students: normalizeStudents(remoteData.settings?.students),
+              students: normalizedStu,
               announcements: remoteData.settings?.announcements || [],
               subjectDetails: { ...DEFAULT_STATE.settings.subjectDetails, ...(remoteData.settings?.subjectDetails || {}) }
             },
@@ -249,7 +247,7 @@
         } else {
           set(dbRef, appState);
         }
-      }, (error) => {
+      }, () => {
         authStatus = "unauthorized"; authErrorText = "This Gmail account is not authorized in your Firebase Database Rules."; render();
       });
     }
@@ -334,6 +332,37 @@
     }
     function isLessonCompletedBy(lesson, studentId) { return Boolean(lesson.completedBy && lesson.completedBy[studentId]); }
     function isCheckPassedBy(lesson, studentId) { return Boolean(lesson.checkPassedBy && lesson.checkPassedBy[studentId]); }
+    function isWorkUploadRequired(asg) {
+      if (asg.requireWorkUpload) return true;
+      const txt = `${asg.title || ""} ${(asg.questions || []).map(q => q.prompt).join(" ")}`.toLowerCase();
+      return txt.includes("scan & upload") || txt.includes("attach pdf");
+    }
+
+    // Chronological Sorting Helpers (Week 1 -> Week 2 -> Week 3, Lesson -> Check-In -> Homework -> Project -> Quiz/Test)
+    function getAssignmentSubOrder(asg) {
+      const titleLow = (asg.title || "").toLowerCase();
+      if (titleLow.includes("check-in") || titleLow.includes("warm-up")) return 1;
+      if (asg.type === "Homework") return 2;
+      if (asg.type === "Project") return 3;
+      if (asg.type === "Quiz") return 4;
+      return 5;
+    }
+
+    function compareAssignmentsChronological(a, b) {
+      const dA = a.dueDate || "9999-12-31", dB = b.dueDate || "9999-12-31";
+      if (dA !== dB) return dA.localeCompare(dB);
+      const oA = getAssignmentSubOrder(a), oB = getAssignmentSubOrder(b);
+      if (oA !== oB) return oA - oB;
+      return (a.title || "").localeCompare(b.title || "");
+    }
+
+    function getChronologicalTimelineForSubject(subject, lessonsList, assignmentsList) {
+      const combined = [
+        ...lessonsList.filter(l => l.subject === subject).map(l => ({ kind: "lesson", sortDate: l.date || "9999-12-31", subOrd: 0, data: l })),
+        ...assignmentsList.filter(a => a.subject === subject).map(a => ({ kind: "assignment", sortDate: a.dueDate || "9999-12-31", subOrd: getAssignmentSubOrder(a), data: a }))
+      ];
+      return combined.sort((a, b) => a.sortDate.localeCompare(b.sortDate) || (a.subOrd - b.subOrd) || (a.data.title || "").localeCompare(b.data.title || ""));
+    }
 
     // Timer & Calendar Helpers
     function formatTimer(secs) { const m = Math.floor(secs / 60), s = secs % 60; return `${m}:${s < 10 ? "0" : ""}${s}`; }
@@ -381,25 +410,27 @@
     // =========================================================================
     function formatRichText(raw) {
       if (!raw) return "";
-      const escaped = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const lines = escaped.split(/\r?\n/);
+      const normalized = String(raw).replace(/\\n/g, "\n");
+      const lines = normalized.split(/\r?\n/);
       let html = "", inStepBox = false;
 
       for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-        // Stacked math step syntax: $$equation || red explanation note$$
-        const stepMatch = line.trim().match(/^\$\$(.+?)\s*\|\|\s*(.+?)\$\$$/);
+        const trimmed = lines[i].trim();
+        // Match stacked step lines: $$equation || red explanation note$$
+        const stepMatch = trimmed.match(/^\$\$(.+?)\s*\|\|\s*(.+?)\$\$$/);
         if (stepMatch) {
           if (!inStepBox) {
-            html += `<div class="my-4 rounded-2xl bg-slate-50 border border-slate-200/90 p-4 space-y-2.5">`;
+            html += `<div class="my-4 rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-2">`;
             inStepBox = true;
           }
-          const eqPart = stepMatch[1].trim();
-          const notePart = stepMatch[2].trim().replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          const eqSafe = stepMatch[1].trim().replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const noteSafe = stepMatch[2].trim()
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
           html += `
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 py-1.5 border-b border-slate-200/60 last:border-b-0">
-              <div class="font-medium text-ink text-base pl-2">$$${eqPart}$$</div>
-              <div class="text-xs sm:text-sm font-bold text-red-600 sm:text-right pl-2 sm:pl-4">← ${notePart}</div>
+            <div class="grid sm:grid-cols-12 items-center gap-2 py-2 border-b border-slate-200/70 last:border-b-0">
+              <div class="sm:col-span-6 font-medium text-ink text-base pl-1">$$${eqSafe}$$</div>
+              <div class="sm:col-span-6 text-xs sm:text-sm font-bold text-red-600 sm:text-right pr-1">← ${noteSafe}</div>
             </div>`;
           continue;
         } else if (inStepBox) {
@@ -407,15 +438,16 @@
           inStepBox = false;
         }
 
-        if (/^###\s+/.test(line)) {
-          html += `<h3 class="text-lg font-bold text-slate-900 mt-5 mb-2">${line.replace(/^###\s+/, "")}</h3>`;
-        } else if (/^##\s+/.test(line)) {
-          html += `<h2 class="text-xl font-bold text-slate-900 mt-6 mb-2">${line.replace(/^##\s+/, "")}</h2>`;
-        } else if (/^\*\s+/.test(line)) {
-          const item = line.replace(/^\*\s+/, "").replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
+        const safeLine = lines[i].replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (/^###\s+/.test(safeLine)) {
+          html += `<h3 class="text-lg font-bold text-slate-900 mt-5 mb-2">${safeLine.replace(/^###\s+/, "")}</h3>`;
+        } else if (/^##\s+/.test(safeLine)) {
+          html += `<h2 class="text-xl font-bold text-slate-900 mt-6 mb-2">${safeLine.replace(/^##\s+/, "")}</h2>`;
+        } else if (/^\*\s+/.test(safeLine)) {
+          const item = safeLine.replace(/^\*\s+/, "").replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
           html += `<li class="ml-5 list-disc text-slate-700 my-1">${item}</li>`;
         } else {
-          const formatted = line.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
+          const formatted = safeLine.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>');
           html += (formatted.trim() === "" ? "<br>" : `<div>${formatted}</div>`);
         }
       }
@@ -484,7 +516,7 @@
 
     // Window-bound Navigation & Actions
     window.selectStudentSubject = (subj) => { activeCourseSubject = subj; render(); };
-    window.closeStudentDetailView = () => { exitStrictSessionCleanup(); activeLessonId = null; activeAssignmentId = null; printableRecord = null; render(); };
+    window.closeStudentDetailView = () => { exitStrictSessionCleanup(); pendingUploadedWorkFile = null; activeLessonId = null; activeAssignmentId = null; printableRecord = null; render(); };
     window.setParentStudentFilter = (stuId) => { parentStudentFilter = stuId; render(); };
     window.openSubmissionReview = (subKey) => { activeReviewKey = subKey; render(); };
     window.closeSubmissionReview = () => { activeReviewKey = null; render(); };
@@ -507,7 +539,7 @@
     window.previewItemInStudentView = (kind, id, subj) => {
       exitStrictSessionCleanup(); currentRole = "student"; if (parentUnlockedSession) authenticatedStudentId = SANDBOX_STUDENT_ID;
       if (subj) activeCourseSubject = subj;
-      activeLessonId = kind === "lesson" ? id : null; activeAssignmentId = kind === "assignment" ? id : null;
+      activeLessonId = kind === "lesson" ? id : null; activeAssignmentId = kind === "assignment" ? id : null; pendingUploadedWorkFile = null;
       updateRoleButtons(); render();
     };
     window.assignSandboxDraftToStudent = (kind, id, targetId) => {
@@ -539,7 +571,7 @@
       saveState("Checklist updated!");
     };
 
-    // Student Actions
+    // Student Actions & File Upload Handler
     window.openLesson = (id) => { activeLessonId = id; activeAssignmentId = null; printableRecord = null; render(); };
     window.submitLessonCheck = (id) => {
       const l = (appState.lessons || []).find(x => x.id === id), sel = document.querySelector('input[name="lesson-check-opt"]:checked'), fb = document.getElementById("lesson-check-feedback");
@@ -549,12 +581,28 @@
     };
     window.markLessonComplete = (id) => { const l = (appState.lessons || []).find(x => x.id === id); if (l) { if (!l.completedBy) l.completedBy = {}; l.completedBy[authenticatedStudentId] = new Date().toISOString(); saveState("Lesson marked complete!"); } };
     window.openAssignment = (id) => {
-      const asg = (appState.assignments || []).find(a => a.id === id); activeAssignmentId = id; activeLessonId = null; printableRecord = null;
+      const asg = (appState.assignments || []).find(a => a.id === id); activeAssignmentId = id; activeLessonId = null; printableRecord = null; pendingUploadedWorkFile = null;
       if (asg?.strictMode) {
         const sub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)];
         if (!sub || sub.status === "in_progress") strictSession = { active: true, assignmentId: id, studentId: authenticatedStudentId, unlockedStarted: false, pausedLocked: false, violations: sub?.violations || [] };
       }
       render();
+    };
+    window.handleStudentWorkFileUpload = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (file.size > 4 * 1024 * 1024) {
+        alert("File is larger than 4 MB. Please upload it to Google Drive and paste the share link instead.");
+        e.target.value = "";
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        pendingUploadedWorkFile = { name: file.name, dataUrl: ev.target.result };
+        const badge = document.getElementById("uploaded-file-badge");
+        if (badge) badge.textContent = `✓ Attached: ${file.name}`;
+      };
+      reader.readAsDataURL(file);
     };
     function collectCurrentAnswers(asg) {
       const ans = {};
@@ -565,20 +613,44 @@
       return ans;
     }
     window.saveAssignmentProgress = (id) => {
-      const asg = (appState.assignments || []).find(a => a.id === id), subKey = getSubKey(authenticatedStudentId, id);
-      appState.submissions[subKey] = { ...(appState.submissions[subKey] || {}), studentId: authenticatedStudentId, assignmentId: id, status: "in_progress", answers: collectCurrentAnswers(asg), projectLink: document.getElementById("asg_project_link_input")?.value.trim() || "", savedAt: new Date().toISOString() };
+      const asg = (appState.assignments || []).find(a => a.id === id), subKey = getSubKey(authenticatedStudentId, id), prev = appState.submissions[subKey] || {};
+      const linkVal = document.getElementById("asg_project_link_input")?.value.trim() || "";
+      appState.submissions[subKey] = {
+        ...prev, studentId: authenticatedStudentId, assignmentId: id, status: "in_progress",
+        answers: collectCurrentAnswers(asg), projectLink: linkVal,
+        uploadedFileName: pendingUploadedWorkFile?.name || prev.uploadedFileName || "",
+        uploadedFileData: pendingUploadedWorkFile?.dataUrl || prev.uploadedFileData || "",
+        savedAt: new Date().toISOString()
+      };
       saveState("Progress saved!");
     };
     window.submitAssignment = (id) => {
-      const asg = (appState.assignments || []).find(a => a.id === id), answers = collectCurrentAnswers(asg), projectLink = document.getElementById("asg_project_link_input")?.value.trim() || "";
+      const asg = (appState.assignments || []).find(a => a.id === id), subKey = getSubKey(authenticatedStudentId, id), prev = appState.submissions[subKey] || {};
+      const linkVal = document.getElementById("asg_project_link_input")?.value.trim() || "";
+      const fileName = pendingUploadedWorkFile?.name || prev.uploadedFileName || "";
+      const fileData = pendingUploadedWorkFile?.dataUrl || prev.uploadedFileData || "";
+
+      // Enforce required PDF / work upload if enabled on this assignment
+      if (isWorkUploadRequired(asg) && !linkVal && !fileData) {
+        alert("Work Upload Required: Please attach your PDF/photo file or paste your Google Drive link showing your written steps before submitting.");
+        return;
+      }
+
+      const answers = collectCurrentAnswers(asg);
       let earned = 0, total = 0, manual = false; const qScores = {};
       asg.questions.forEach(q => {
         const pts = Number(q.points) || 0; total += pts; const val = (answers[q.id] || "").trim();
         if (q.type === "mcq" || q.type === "tf") { qScores[q.id] = val === String(q.correctAnswer) ? pts : 0; earned += qScores[q.id]; }
         else { manual = true; qScores[q.id] = (q.type === "fill" && q.correctAnswer && val.toLowerCase() === q.correctAnswer.trim().toLowerCase()) ? pts : 0; earned += qScores[q.id]; }
       });
-      const subKey = getSubKey(authenticatedStudentId, id), prev = appState.submissions[subKey] || {};
-      appState.submissions[subKey] = { studentId: authenticatedStudentId, assignmentId: id, status: manual ? "needs_review" : "graded", answers, projectLink, questionScores: qScores, earnedPoints: earned, totalPoints: total, parentFeedback: prev.parentFeedback || "", violations: strictSession.violations.length ? strictSession.violations : (prev.violations || []), submittedAt: new Date().toISOString() };
+      appState.submissions[subKey] = {
+        studentId: authenticatedStudentId, assignmentId: id, status: manual ? "needs_review" : "graded",
+        answers, projectLink: linkVal, uploadedFileName: fileName, uploadedFileData: fileData,
+        questionScores: qScores, earnedPoints: earned, totalPoints: total, parentFeedback: prev.parentFeedback || "",
+        violations: strictSession.violations.length ? strictSession.violations : (prev.violations || []),
+        submittedAt: new Date().toISOString()
+      };
+      pendingUploadedWorkFile = null;
       exitStrictSessionCleanup(); saveState("Assignment submitted!");
     };
     window.addReadingLogEntry = (e) => { e.preventDefault(); appState.readingLogs.unshift({ id: "read_" + Date.now(), studentId: authenticatedStudentId, title: document.getElementById("read_title").value.trim(), author: document.getElementById("read_author").value.trim(), pages: Number(document.getElementById("read_pages").value) || 0, dateFinished: document.getElementById("read_date").value, rating: Number(document.getElementById("read_rating").value) || 5, reflection: document.getElementById("read_reflection").value.trim() }); saveState("Book logged!"); };
@@ -622,7 +694,7 @@
         completedBy: existing?.completedBy || {}, checkPassedBy: existing?.checkPassedBy || {}
       };
       if (existing) { appState.lessons[appState.lessons.findIndex(l => l.id === editingLessonId)] = payload; editingLessonId = null; }
-      else appState.lessons.unshift(payload);
+      else appState.lessons.push(payload);
       parentSubjectTab = subj; parentSubjectEditorMode = null; saveState(existing ? "Lesson updated!" : "Lesson saved!");
     };
 
@@ -633,7 +705,9 @@
         document.getElementById("asg_student").value = asg.studentId || SANDBOX_STUDENT_ID; document.getElementById("asg_subject").value = asg.subject;
         document.getElementById("asg_type").value = asg.type || "Homework"; document.getElementById("asg_due").value = asg.dueDate || "";
         document.getElementById("asg_title").value = asg.title || ""; document.getElementById("asg_linked_lesson").value = asg.linkedLessonId || "";
-        document.getElementById("asg_strict").checked = Boolean(asg.strictMode); document.getElementById("asg_allow_link").checked = Boolean(asg.allowProjectLink);
+        document.getElementById("asg_strict").checked = Boolean(asg.strictMode);
+        document.getElementById("asg_allow_link").checked = Boolean(asg.allowProjectLink);
+        document.getElementById("asg_require_upload").checked = Boolean(isWorkUploadRequired(asg));
       }, 20);
     };
 
@@ -642,14 +716,17 @@
       const validQ = builderQuestions.filter(q => q.prompt.trim().length > 0);
       if (!validQ.length) { alert("Add at least one question."); return; }
       const existing = editingAssignmentId ? appState.assignments.find(a => a.id === editingAssignmentId) : null, subj = document.getElementById("asg_subject").value;
+      const reqUpload = document.getElementById("asg_require_upload").checked;
       const payload = {
         id: existing ? existing.id : "asg_" + Date.now(), studentId: document.getElementById("asg_student").value, subject: subj,
         title: document.getElementById("asg_title").value.trim(), type: document.getElementById("asg_type").value, dueDate: document.getElementById("asg_due").value,
-        linkedLessonId: document.getElementById("asg_linked_lesson").value, strictMode: document.getElementById("asg_strict").checked, allowProjectLink: document.getElementById("asg_allow_link").checked,
+        linkedLessonId: document.getElementById("asg_linked_lesson").value, strictMode: document.getElementById("asg_strict").checked,
+        allowProjectLink: document.getElementById("asg_allow_link").checked || reqUpload,
+        requireWorkUpload: reqUpload,
         questions: structuredClone(validQ)
       };
       if (existing) { appState.assignments[appState.assignments.findIndex(a => a.id === editingAssignmentId)] = payload; editingAssignmentId = null; }
-      else appState.assignments.unshift(payload);
+      else appState.assignments.push(payload);
       builderQuestions = [{ id: "bq_" + Date.now(), type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
       parentSubjectTab = subj; parentSubjectEditorMode = null; saveState(existing ? "Assignment updated!" : "Assignment saved!");
     };
@@ -683,7 +760,7 @@
     window.removeStudent = (id) => { if (appState.settings.students.length <= 1) return; if (confirm("Remove student?")) { appState.settings.students = appState.settings.students.filter(s => s.id !== id); saveState("Removed!"); } };
     window.saveGeneralSettings = (e) => { e.preventDefault(); appState.settings.schoolYear = document.getElementById("set_school_year").value.trim() || "2026–2027"; appState.settings.readingGoalBooks = Number(document.getElementById("set_reading_goal").value) || 20; const pin = document.getElementById("set_parent_pin").value.trim(); if (pin.length >= 4) appState.settings.parentPin = pin; saveState("Settings saved!"); };
 
-    // 2-Way CSV Export & Upsert Importer
+    // 2-Way CSV Export & Upsert Importer (Preserves chronological order)
     function csvEscape(v) { const s = String(v ?? ""); return (s.includes('"') || s.includes(',') || s.includes('\n')) ? '"' + s.replace(/"/g, '""') + '"' : s; }
     function parseCSVRows(text) {
       const rows = []; let row = [], val = "", inQ = false;
@@ -702,14 +779,14 @@
     window.exportCurrentCurriculumCSV = () => {
       const out = ["RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo"];
       (appState.schedule || []).forEach(b => out.push(["Schedule", b.subject, b.title, b.day, `${b.startTime}-${b.endTime}`, b.category, "", "", "", "", b.id, "ALL"].map(csvEscape).join(",")));
-      (appState.lessons || []).forEach(l => out.push(["Lesson", l.subject, l.title, l.date || "", "", (l.content || "").replace(/\r?\n/g, "\\n"), l.checkQuestion?.enabled ? "mcq" : "", (l.checkQuestion?.options || []).filter(Boolean).join(" | "), l.checkQuestion?.enabled ? String(l.checkQuestion.correctIndex ?? 0) : "", l.checkQuestion?.enabled ? (l.checkQuestion.prompt || "") : "", l.id, l.studentId || "stu_1"].map(csvEscape).join(",")));
-      (appState.assignments || []).forEach(a => (a.questions || []).forEach(q => out.push(["Assignment", a.subject, a.title, a.dueDate || "", a.type || "Homework", q.prompt || "", q.type || "mcq", q.type === "mcq" ? (q.options || []).join(" | ") : "", q.correctAnswer || "", `${q.points || 10}${a.strictMode ? " STRICT" : ""}`, a.id, a.studentId || "stu_1"].map(csvEscape).join(","))));
+      [...(appState.lessons || [])].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(l => out.push(["Lesson", l.subject, l.title, l.date || "", "", (l.content || "").replace(/\r?\n/g, "\\n"), l.checkQuestion?.enabled ? "mcq" : "", (l.checkQuestion?.options || []).filter(Boolean).join(" | "), l.checkQuestion?.enabled ? String(l.checkQuestion.correctIndex ?? 0) : "", l.checkQuestion?.enabled ? (l.checkQuestion.prompt || "") : "", l.id, l.studentId || "stu_1"].map(csvEscape).join(",")));
+      [...(appState.assignments || [])].sort(compareAssignmentsChronological).forEach(a => (a.questions || []).forEach(q => out.push(["Assignment", a.subject, a.title, a.dueDate || "", a.type || "Homework", q.prompt || "", q.type || "mcq", q.type === "mcq" ? (q.options || []).join(" | ") : "", q.correctAnswer || "", `${q.points || 10}${a.strictMode ? " STRICT" : ""}${isWorkUploadRequired(a) ? " REQUIRE_UPLOAD" : ""}`, a.id, a.studentId || "stu_1"].map(csvEscape).join(","))));
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([out.join("\n")], { type: "text/csv;charset=utf-8;" })); a.download = `Sunshine_Homeschool_Live_Curriculum_${new Date().toISOString().slice(0,10)}.csv`; a.click();
       showSavedToast("Exported live curriculum CSV!");
     };
 
     window.downloadCurriculumCSVTemplate = () => {
-      const sample = "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo\nSchedule,Pre-Algebra,Pre-Algebra Block,Monday,09:00-10:00,Independent Study,,,,,ALL\nLesson,Pre-Algebra,Sample Lesson,2026-11-30,,\"### Step-by-Step Example\\n$$2x + 4 = 10 || Original equation$$\\n$$2x = 6 || Subtract 4 from both sides$$\\n$$x = 3 || Divide both sides by 2$$\",mcq,2 | 3 | 4 | 5,1,Quick Check: What is x?,,__sandbox_tester__\nAssignment,Pre-Algebra,Mon 11/30 Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10,,__sandbox_tester__";
+      const sample = "RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo\nSchedule,Pre-Algebra,Pre-Algebra Block,Monday,09:00-10:00,Independent Study,,,,,ALL\nLesson,Pre-Algebra,Sample Lesson,2026-11-30,,\"### Step-by-Step Example\\n$$2x + 4 = 10 || Original equation$$\\n$$2x = 6 || Subtract 4 from both sides$$\\n$$x = 3 || Divide both sides by 2$$\",mcq,2 | 3 | 4 | 5,1,Quick Check: What is x?,,__sandbox_tester__\nAssignment,Pre-Algebra,Mon 11/30 Warm-Up,2026-11-30,Homework,Solve for x: 2x = 10,fill,,5,10 REQUIRE_UPLOAD,,__sandbox_tester__";
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([sample], { type: "text/csv;charset=utf-8;" })); a.download = "sunshine-homeschool-template.csv"; a.click();
     };
 
@@ -737,21 +814,30 @@
             const opts = optsRaw ? optsRaw.split("|").map(s => s.trim()) : [], hasCheck = Boolean(ptsRaw && opts.length >= 2);
             const idx = itemId ? appState.lessons.findIndex(l => l.id === itemId) : -1, prev = idx !== -1 ? appState.lessons[idx] : null;
             const obj = { id: prev ? prev.id : ("les_" + Date.now() + "_" + i), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Lesson", date: dateOrDay || "", content: (content || "").replace(/\\n/g, "\n"), youtubeUrl: prev?.youtubeUrl || "", resourceLink: prev?.resourceLink || "", imageUrl: prev?.imageUrl || "", checkQuestion: { enabled: hasCheck, prompt: hasCheck ? ptsRaw : "", options: [0,1,2,3].map(k => opts[k] || ""), correctIndex: Number(corrRaw) || 0 }, completedBy: prev?.completedBy || {}, checkPassedBy: prev?.checkPassedBy || {} };
-            if (idx !== -1) appState.lessons[idx] = obj; else appState.lessons.unshift(obj);
+            if (idx !== -1) appState.lessons[idx] = obj; else appState.lessons.push(obj);
             lCount++;
           } else if (rec === "assignment") {
-            const key = itemId ? `ID:${itemId}` : `${subj}||${title}||${dateOrDay}`, strictFlag = (ptsRaw || "").toUpperCase().includes("STRICT"), ptsNum = parseInt((ptsRaw || "10").replace(/\D/g, ""), 10) || 10;
+            const key = itemId ? `ID:${itemId}` : `${subj}||${title}||${dateOrDay}`;
+            const ptsUpper = (ptsRaw || "").toUpperCase();
+            const strictFlag = ptsUpper.includes("STRICT");
+            const reqUploadFlag = ptsUpper.includes("REQUIRE_UPLOAD") || ptsUpper.includes("REQUIRE_PDF") || (content || "").toLowerCase().includes("scan & upload");
+            const ptsNum = parseInt((ptsRaw || "10").replace(/\D/g, ""), 10) || 10;
             if (!asgMap[key]) {
               const prev = itemId ? appState.assignments.find(a => a.id === itemId) : null;
-              asgMap[key] = { id: prev ? prev.id : ("asg_" + Date.now() + "_" + i), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Assignment", type: timeOrType || "Homework", dueDate: dateOrDay || "", linkedLessonId: prev?.linkedLessonId || "", strictMode: strictFlag, allowProjectLink: prev?.allowProjectLink ?? true, questions: [] };
-            } else if (strictFlag) asgMap[key].strictMode = true;
+              asgMap[key] = { id: prev ? prev.id : ("asg_" + Date.now() + "_" + i), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Assignment", type: timeOrType || "Homework", dueDate: dateOrDay || "", linkedLessonId: prev?.linkedLessonId || "", strictMode: strictFlag, allowProjectLink: true, requireWorkUpload: reqUploadFlag || Boolean(prev?.requireWorkUpload), questions: [] };
+            } else {
+              if (strictFlag) asgMap[key].strictMode = true;
+              if (reqUploadFlag) asgMap[key].requireWorkUpload = true;
+            }
             if (content) {
               const qt = (qTypeRaw || "mcq").toLowerCase();
               asgMap[key].questions.push({ id: "q_" + Date.now() + "_" + i, type: qt, prompt: content, points: ptsNum, options: qt === "mcq" && optsRaw ? optsRaw.split("|").map(s => s.trim()) : [], correctAnswer: corrRaw || "" });
             }
           }
         }
-        Object.values(asgMap).forEach(obj => { const idx = appState.assignments.findIndex(a => a.id === obj.id); if (idx !== -1) appState.assignments[idx] = obj; else appState.assignments.unshift(obj); aCount++; });
+        Object.values(asgMap).forEach(obj => { const idx = appState.assignments.findIndex(a => a.id === obj.id); if (idx !== -1) appState.assignments[idx] = obj; else appState.assignments.push(obj); aCount++; });
+        appState.lessons.sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+        appState.assignments.sort(compareAssignmentsChronological);
         event.target.value = ""; saveState(`Synced ${lCount} lessons, ${aCount} assignments, & ${sCount} schedule blocks!`);
       };
       reader.readAsText(file);
@@ -792,10 +878,13 @@
     window.openPrintablePortfolio = (kind, id, studentId) => { printableRecord = { kind, id, studentId: studentId || authenticatedStudentId }; render(); };
     window.closePrintablePortfolio = () => { printableRecord = null; render(); };
 
-    // Metrics
+    // Metrics (Chronologically sorted everywhere)
     function percentToGpaPoints(pct) { return pct >= 90 ? 4 : pct >= 80 ? 3 : pct >= 70 ? 2 : pct >= 60 ? 1 : 0; }
     function computeStudentMetrics(student) {
-      const stuSubjects = getStudentSubjects(student), myLessons = (appState.lessons || []).filter(l => isLessonVisibleToStudent(l, student.id)), myAssignments = (appState.assignments || []).filter(a => isAssignmentVisibleToStudent(a, student.id)), subs = appState.submissions || {};
+      const stuSubjects = getStudentSubjects(student);
+      const myLessons = (appState.lessons || []).filter(l => isLessonVisibleToStudent(l, student.id)).sort((a,b) => (a.date||"9999-12-31").localeCompare(b.date||"9999-12-31"));
+      const myAssignments = (appState.assignments || []).filter(a => isAssignmentVisibleToStudent(a, student.id)).sort(compareAssignmentsChronological);
+      const subs = appState.submissions || {};
       const completedLessons = myLessons.filter(l => isLessonCompletedBy(l, student.id));
       const todoAssignments = myAssignments.filter(a => !subs[getSubKey(student.id, a.id)]);
       const inProgressAssignments = myAssignments.filter(a => subs[getSubKey(student.id, a.id)]?.status === "in_progress");
@@ -858,10 +947,12 @@
     function renderTabHome(student, metrics) {
       const themes = [{ bg: "bg-terracotta-500", bar: "bg-amberwarm-400", icon: "🧮" }, { bg: "bg-tealhub-500", bar: "bg-tealhub-500", icon: "🧪" }, { bg: "bg-sage-500", bar: "bg-sage-500", icon: "📖" }];
       const subjs = getStudentSubjects(student).slice(0, 4), top3 = subjs.slice(0, 3), fourth = subjs[3] || subjs[0] || "General", anns = appState.settings.announcements || [];
-      const getTasks = (s) => [
-        ...metrics.myLessons.filter(l => l.subject === s).map(l => ({ kind: "lesson", id: l.id, title: l.title, done: isLessonCompletedBy(l, student.id) })),
-        ...metrics.myAssignments.filter(a => a.subject === s).map(a => ({ kind: "assignment", id: a.id, title: a.title, done: ["graded", "needs_review"].includes((appState.submissions || {})[getSubKey(student.id, a.id)]?.status) }))
-      ];
+      // Uses exact chronological subject timeline (Week 1 Lesson -> Week 1 Homework -> Week 1 Quiz -> Week 2...)
+      const getTasks = (s) => getChronologicalTimelineForSubject(s, metrics.myLessons, metrics.myAssignments).map(item => {
+        if (item.kind === "lesson") return { kind: "lesson", id: item.data.id, title: item.data.title, done: isLessonCompletedBy(item.data, student.id) };
+        const st = (appState.submissions || {})[getSubKey(student.id, item.data.id)]?.status;
+        return { kind: "assignment", id: item.data.id, title: item.data.title, done: ["graded", "needs_review"].includes(st) };
+      });
       const fourthTasks = getTasks(fourth);
       return `
         ${anns.length ? `<div class="mb-5 bg-white/90 rounded-2xl px-5 py-3.5 border border-white shadow-sm flex justify-between text-xs sm:text-sm"><div><span class="px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 font-extrabold mr-2">📣 NOTE</span><strong>${anns[0].title}:</strong> ${anns[0].body}</div><span class="text-slate-400">${anns[0].date}</span></div>` : ''}
@@ -871,7 +962,7 @@
             <div class="grid sm:grid-cols-3 gap-4">
               ${top3.map((subj, idx) => {
                 const th = themes[idx % 3], tasks = getTasks(subj), done = tasks.filter(t => t.done).length, pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0, next = tasks.find(t => !t.done) || tasks[0];
-                return `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between"><div><div class="${th.bg} px-4 py-3.5 text-white flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl">${th.icon}</div><h3 class="font-display font-extrabold text-base leading-tight">${subj}</h3></div><div class="p-4 space-y-2.5">${tasks.slice(0,3).map(t => `<label class="flex items-start gap-2.5 text-xs sm:text-sm text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No tasks today.</p>'}</div></div><div class="px-4 pb-4 pt-1 space-y-3">${next ? `<div class="text-center"><button onclick="${next.kind === 'lesson' ? `openLesson('${next.id}')` : `openAssignment('${next.id}')`}" class="px-6 py-1.5 rounded-full bg-sage-500 text-white font-display font-bold text-xs">${next.done ? 'Review' : 'Start'}</button></div>` : ''}<div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div class="${th.bar} h-full" style="width:${pct}%"></div></div></div></div>`;
+                return `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between"><div><div class="${th.bg} px-4 py-3.5 text-white flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl">${th.icon}</div><h3 class="font-display font-extrabold text-base leading-tight">${subj}</h3></div><div class="p-4 space-y-2.5">${tasks.slice(0,4).map(t => `<label class="flex items-start gap-2.5 text-xs sm:text-sm text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No tasks today.</p>'}</div></div><div class="px-4 pb-4 pt-1 space-y-3">${next ? `<div class="text-center"><button onclick="${next.kind === 'lesson' ? `openLesson('${next.id}')` : `openAssignment('${next.id}')`}" class="px-6 py-1.5 rounded-full bg-sage-500 text-white font-display font-bold text-xs">${next.done ? 'Review' : 'Start'}</button></div>` : ''}<div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div class="${th.bar} h-full" style="width:${pct}%"></div></div></div></div>`;
               }).join("")}
             </div>
             <div class="grid sm:grid-cols-12 gap-4">
@@ -906,13 +997,6 @@
       return `<div class="space-y-6"><div class="bg-white rounded-3xl p-6 shadow-sm flex justify-between items-center"><div><h3 class="text-lg font-display font-extrabold text-ink">Weekly Schedule</h3><p class="text-xs text-slate-500">Sync blocks directly to Google Calendar.</p></div><button onclick="downloadScheduleICS()" class="px-4 py-2.5 rounded-xl bg-tealhub-500 text-white text-xs font-bold">📅 Export All (.ics)</button></div>${appState.settings.googleCalendarEmbedUrl ? `<div class="bg-white rounded-3xl p-5 shadow-sm"><iframe src="${appState.settings.googleCalendarEmbedUrl}" style="border:0" width="100%" height="420" frameborder="0" class="rounded-2xl"></iframe></div>` : ''}<div class="grid md:grid-cols-5 gap-4">${days.map(day => `<div class="bg-white rounded-3xl p-4 shadow-sm"><h4 class="font-display font-extrabold text-sm pb-2 mb-3 border-b">${day}</h4><div class="space-y-3">${(appState.schedule || []).filter(b => b.day === day).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")).map(b => `<div class="p-3 rounded-2xl border bg-slate-50 space-y-1"><p class="text-[11px] font-bold">${b.startTime} – ${b.endTime}</p><p class="font-bold text-xs">${b.title}</p><a href="${buildGoogleCalendarScheduleUrl(b)}" target="_blank" class="text-[11px] font-bold text-tealhub-600 underline">+ Google Cal ↗</a></div>`).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">Open</p>'}</div></div>`).join("")}</div></div>`;
     }
 
-    function getChronologicalTimelineForSubject(subject, lessonsList, assignmentsList) {
-      return [
-        ...lessonsList.filter(l => l.subject === subject).map(l => ({ kind: "lesson", sortDate: l.date || "9999-12-31", priority: 0, data: l })),
-        ...assignmentsList.filter(a => a.subject === subject).map(a => ({ kind: "assignment", sortDate: a.dueDate || "9999-12-31", priority: 1, data: a }))
-      ].sort((a, b) => a.sortDate.localeCompare(b.sortDate) || (a.priority - b.priority) || (((a.data.title||"").toLowerCase().includes("warm-up")?0:1) - ((b.data.title||"").toLowerCase().includes("warm-up")?0:1)));
-    }
-
     function renderTabSubjects(student, metrics) {
       const subjects = getStudentSubjects(student);
       if (!subjects.includes(activeCourseSubject)) activeCourseSubject = subjects[0] || "";
@@ -924,15 +1008,16 @@
             <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm"><span class="text-xs font-bold uppercase text-tealhub-600">Course Syllabus</span><h3 class="text-2xl font-display font-extrabold text-ink mt-1">${activeCourseSubject}</h3>${details.currentUnit ? `<div class="mt-3 inline-block px-3 py-1 rounded-xl bg-amberwarm-50 text-amberwarm-600 text-xs font-bold">${details.currentUnit}</div>` : ''}<div class="text-sm text-slate-600 mt-4 leading-relaxed">${details.syllabus ? formatRichText(details.syllabus) : "No syllabus added yet."}</div></div>
             <div class="bg-white rounded-3xl p-6 shadow-sm"><h4 class="font-display font-extrabold text-ink mb-4">Course Roadmap — In Chronological Order (${timeline.length})</h4><div class="space-y-3">${timeline.map(item => item.kind === "lesson"
               ? `<div class="p-4 rounded-2xl border-l-4 border-l-tealhub-500 border bg-tealhub-500/5 flex justify-between items-center gap-3"><div><span class="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-tealhub-500 text-white mr-2">📖 Lesson</span><span class="text-xs font-bold text-slate-600">${item.data.date || ''}</span><h5 class="font-bold text-sm text-ink mt-1">${item.data.title}</h5></div><button onclick="openLesson('${item.data.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${isLessonCompletedBy(item.data, student.id) ? 'bg-emerald-100 text-emerald-800' : 'bg-tealhub-500 text-white'}">${isLessonCompletedBy(item.data, student.id) ? '✓ Completed' : 'Start Lesson →'}</button></div>`
-              : (() => { const a = item.data, sub = (appState.submissions || {})[getSubKey(student.id, a.id)], done = sub && ["graded","needs_review"].includes(sub.status); return `<div class="sm:ml-6 p-4 rounded-2xl border bg-slate-50/80 flex justify-between items-center gap-3"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-white border mr-2">${a.type}</span><span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span><h5 class="font-bold text-sm text-ink mt-1">${a.title}</h5></div><button onclick="openAssignment('${a.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-sage-500 text-white'}">${done ? `✓ ${sub.earnedPoints}/${sub.totalPoints} pts` : 'Start'}</button></div>`; })()
+              : (() => { const a = item.data, sub = (appState.submissions || {})[getSubKey(student.id, a.id)], done = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(a); return `<div class="sm:ml-6 p-4 rounded-2xl border bg-slate-50/80 flex justify-between items-center gap-3"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-white border mr-1.5">${a.type}</span>${reqUp ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 mr-1.5">📎 PDF/Work Required</span>` : ''}<span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span><h5 class="font-bold text-sm text-ink mt-1">${a.title}</h5></div><button onclick="openAssignment('${a.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-sage-500 text-white'}">${done ? `✓ ${sub.earnedPoints}/${sub.totalPoints} pts` : 'Start'}</button></div>`; })()
             ).join("") || '<p class="text-xs text-slate-400">No items in this course yet.</p>'}</div></div>
           </div>
         </div>`;
     }
 
     function renderTabAssignments(student, metrics) {
-      const lists = { todo: metrics.todoAssignments, in_progress: metrics.inProgressAssignments, completed: metrics.completedAssignments }, activeList = lists[assignmentFilterTab] || [];
-      return `<div class="space-y-5"><div class="flex flex-wrap gap-2">${[{ id: "todo", label: "To-Do", count: metrics.todoAssignments.length }, { id: "in_progress", label: "In Progress", count: metrics.inProgressAssignments.length }, { id: "completed", label: "Completed", count: metrics.completedAssignments.length }].map(t => `<button onclick="assignmentFilterTab='${t.id}'; render();" class="px-4 py-2 rounded-2xl text-xs font-bold ${assignmentFilterTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-white text-slate-600'}">${t.label} (${t.count})</button>`).join("")}</div><div class="space-y-4">${activeList.map(asg => { const sub = (appState.submissions || {})[getSubKey(student.id, asg.id)], isDone = sub && ["graded","needs_review"].includes(sub.status); return `<div class="bg-white rounded-3xl p-6 shadow-sm flex justify-between items-center gap-4"><div><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span><h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4><span class="text-xs text-slate-500">Due ${asg.dueDate || 'N/A'}</span></div><button onclick="openAssignment('${asg.id}')" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">${isDone ? `${sub.earnedPoints}/${sub.totalPoints} pts (View)` : 'Open'}</button></div>`; }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
+      const lists = { todo: [...metrics.todoAssignments].sort(compareAssignmentsChronological), in_progress: [...metrics.inProgressAssignments].sort(compareAssignmentsChronological), completed: [...metrics.completedAssignments].sort(compareAssignmentsChronological) };
+      const activeList = lists[assignmentFilterTab] || [];
+      return `<div class="space-y-5"><div class="flex flex-wrap gap-2">${[{ id: "todo", label: "To-Do", count: lists.todo.length }, { id: "in_progress", label: "In Progress", count: lists.in_progress.length }, { id: "completed", label: "Completed", count: lists.completed.length }].map(t => `<button onclick="assignmentFilterTab='${t.id}'; render();" class="px-4 py-2 rounded-2xl text-xs font-bold ${assignmentFilterTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-white text-slate-600'}">${t.label} (${t.count})</button>`).join("")}</div><div class="space-y-4">${activeList.map(asg => { const sub = (appState.submissions || {})[getSubKey(student.id, asg.id)], isDone = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(asg); return `<div class="bg-white rounded-3xl p-6 shadow-sm flex flex-wrap justify-between items-center gap-4"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>${asg.strictMode ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-700">🔒 Strict Mode</span>` : ''}${reqUp ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600">📎 PDF / Work Upload Required</span>` : ''}</div><h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4><span class="text-xs text-slate-500">Due <strong>${asg.dueDate || 'N/A'}</strong></span></div><button onclick="openAssignment('${asg.id}')" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">${isDone ? `${sub.earnedPoints}/${sub.totalPoints} pts (View)` : 'Open'}</button></div>`; }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
     }
 
     function renderTabResources() {
@@ -973,7 +1058,7 @@
 
     function renderStudentAssignmentDetail(id) {
       const asg = (appState.assignments || []).find(a => a.id === id); if (!asg) return "";
-      const sub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)], isSub = sub && ["graded", "needs_review"].includes(sub.status), saved = sub?.answers || {};
+      const sub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)], isSub = sub && ["graded", "needs_review"].includes(sub.status), saved = sub?.answers || {}, reqUp = isWorkUploadRequired(asg);
       if (asg.strictMode && !isSub && !strictSession.unlockedStarted) {
         return `<div class="max-w-lg mx-auto bg-white rounded-3xl p-8 border-2 border-slate-900 text-center my-8"><div class="text-3xl mb-3">🔒</div><h2 class="text-2xl font-display font-extrabold">${asg.title}</h2><p class="text-sm text-slate-600 my-4">Requires Full-Screen Focus Mode. Tab switches will pause the test.</p><div class="flex gap-3"><button onclick="closeStudentDetailView()" class="flex-1 py-3 rounded-xl border font-bold text-sm">Cancel</button><button onclick="startStrictFullScreen('${asg.id}')" class="flex-1 py-3 rounded-xl bg-ink text-white font-bold text-sm">Begin Test</button></div></div>`;
       }
@@ -982,6 +1067,31 @@
           <div class="flex justify-between mb-6">${!asg.strictMode || isSub ? `<button onclick="closeStudentDetailView()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">← Back to Hub</button>` : `<span class="text-xs font-bold text-red-600 bg-white px-3 py-1.5 rounded-full">🔒 Focus Monitoring Active</span>`}</div>
           <div class="bg-white rounded-3xl p-6 shadow-sm mb-6"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span><h1 class="text-2xl font-display font-extrabold mt-1">${asg.title}</h1>${isSub ? `<div class="mt-4 p-4 rounded-2xl bg-sage-50 flex justify-between items-center"><span class="font-bold text-sage-700">Score</span><span class="text-2xl font-extrabold">${sub.earnedPoints} / ${sub.totalPoints}</span></div>` : ''}</div>
           <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6 shadow-sm"><div class="flex justify-between gap-4 mb-3"><p class="font-semibold"><span class="text-tealhub-600 font-extrabold mr-1">${idx+1}.</span> ${formatMathOption(q.prompt)}</p><span class="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg shrink-0">${q.points} pts</span></div>${q.type==="mcq"?`<div class="space-y-2">${q.options.map((o,oi)=>`<label class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer"><input type="radio" name="ans_${q.id}" value="${oi}" ${String(saved[q.id]??"")===String(oi)?'checked':''} ${isSub?'disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>`:q.type==="tf"?`<div class="flex gap-3">${["True","False"].map(v=>`<label class="flex-1 p-3 rounded-xl border flex justify-center gap-2"><input type="radio" name="ans_${q.id}" value="${v}" ${saved[q.id]===v?'checked':''} ${isSub?'disabled':''}/>${v}</label>`).join("")}</div>`:q.type==="fill"?`<input id="ans_${q.id}" value="${(saved[q.id]||"").replace(/"/g,'&quot;')}" ${isSub?'disabled':''} class="w-full px-4 py-2.5 rounded-xl border text-sm"/>`:`<textarea id="ans_${q.id}" rows="4" ${isSub?'disabled':''} class="w-full px-4 py-3 rounded-xl border text-sm">${saved[q.id]||""}</textarea>`}</div>`).join("")}</div>
+
+          ${(asg.allowProjectLink || reqUp) ? `
+            <div class="mt-5 bg-white rounded-3xl p-6 shadow-sm border ${reqUp ? 'border-amberwarm-400' : 'border-white'} space-y-3">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold uppercase ${reqUp ? 'text-amberwarm-600' : 'text-tealhub-600'}">📎 ${reqUp ? 'Required: Upload Scanned Work PDF / Photo OR Paste Google Drive Link' : 'Optional: Attach Google Drive Link or Scanned Work PDF'}</label>
+                ${reqUp ? `<span class="text-[11px] font-extrabold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600">REQUIRED</span>` : ''}
+              </div>
+              ${!isSub ? `
+                <div class="flex flex-wrap items-center gap-3">
+                  <label class="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-ink text-xs font-bold cursor-pointer">
+                    📄 Upload PDF / Photo
+                    <input type="file" accept=".pdf,image/*" onchange="handleStudentWorkFileUpload(event)" class="hidden" />
+                  </label>
+                  <span id="uploaded-file-badge" class="text-xs font-bold text-sage-700">${pendingUploadedWorkFile?.name || sub?.uploadedFileName ? `✓ Attached: ${pendingUploadedWorkFile?.name || sub?.uploadedFileName}` : 'No file selected'}</span>
+                </div>
+                <input type="url" id="asg_project_link_input" value="${(sub?.projectLink || '').replace(/"/g,'&quot;')}" placeholder="Or paste Google Drive / Docs share link (https://...)" class="w-full px-4 py-2.5 rounded-xl border text-sm" />
+              ` : `
+                <div class="text-xs space-y-1">
+                  ${sub?.uploadedFileName ? `<p class="font-bold text-sage-700">✓ File Uploaded: ${sub.uploadedFileName}</p>` : ''}
+                  ${sub?.projectLink ? `<a href="${sub.projectLink}" target="_blank" class="text-tealhub-600 font-bold underline">Open Attached Google Drive Link ↗</a>` : ''}
+                </div>
+              `}
+            </div>
+          ` : ''}
+
           ${!isSub ? `<div class="mt-6 bg-white p-5 rounded-3xl flex justify-between gap-3">${!asg.strictMode ? `<button onclick="saveAssignmentProgress('${asg.id}')" class="px-5 py-2.5 rounded-xl border font-bold text-sm">Save Progress</button>` : '<span></span>'}<button onclick="submitAssignment('${asg.id}')" class="px-7 py-3 rounded-xl bg-sage-500 text-white font-bold text-sm">Submit ✓</button></div>` : ''}
         </div>`;
     }
@@ -1047,7 +1157,11 @@
                     <div class="flex justify-between"><h4 class="font-bold">${editingAssignmentId ? 'Edit Assignment' : 'New Homework / Quiz'}</h4><button type="button" onclick="parentSubjectEditorMode=null; render();" class="text-xs font-bold text-slate-500">✕ Cancel</button></div>
                     <div class="grid sm:grid-cols-4 gap-3"><select id="asg_student" class="px-3 py-2 rounded-xl border text-xs bg-white"><option value="${SANDBOX_STUDENT_ID}" selected>🧪 Teacher Sandbox (Draft)</option>${realStudents.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}<option value="ALL">All Students</option></select><select id="asg_subject" class="px-3 py-2 rounded-xl border text-xs bg-white">${allSubjects.map(s => `<option ${s===parentSubjectTab?'selected':''}>${s}</option>`).join("")}</select><select id="asg_type" class="px-3 py-2 rounded-xl border text-xs bg-white"><option>Homework</option><option>Quiz</option><option>Test</option><option>Project</option></select><input type="date" id="asg_due" value="${new Date().toISOString().slice(0,10)}" class="px-3 py-2 rounded-xl border text-xs bg-white"/></div>
                     <div class="grid sm:grid-cols-2 gap-3"><input id="asg_title" required placeholder="Title" class="px-3 py-2 rounded-xl border text-sm bg-white"/><select id="asg_linked_lesson" class="px-3 py-2 rounded-xl border text-xs bg-white"><option value="">Available Immediately</option>${(appState.lessons||[]).map(l=>`<option value="${l.id}">${l.title}</option>`).join("")}</select></div>
-                    <div class="flex gap-4 text-xs font-bold"><label><input type="checkbox" id="asg_strict"/> 🔒 Strict Test Mode</label><label><input type="checkbox" id="asg_allow_link" checked/> 📎 Allow Google Drive Link</label></div>
+                    <div class="flex flex-wrap gap-4 text-xs font-bold">
+                      <label><input type="checkbox" id="asg_strict"/> 🔒 Strict Test Mode</label>
+                      <label><input type="checkbox" id="asg_allow_link" checked/> 📎 Allow Drive / PDF Upload</label>
+                      <label class="text-amberwarm-600"><input type="checkbox" id="asg_require_upload"/> ⚠️ Require PDF / Work Upload Before Submit</label>
+                    </div>
                     <div class="flex gap-1.5"><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ MCQ</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ T/F</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Fill</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Open</button></div>
                     ${builderQuestions.map((q, idx) => `<div class="p-4 rounded-xl bg-white border space-y-2"><div class="flex justify-between text-xs font-bold"><span>Q${idx+1} (${q.type})</span><div>Pts: <input type="number" id="bq_pts_${idx}" value="${q.points}" class="w-14 border rounded px-1"/> ${builderQuestions.length>1?`<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 ml-2">✕</button>`:''}</div></div><input id="bq_prompt_${idx}" value="${(q.prompt||'').replace(/"/g,'&quot;')}" placeholder="Question prompt" class="w-full px-3 py-1.5 rounded border text-xs"/>${q.type==='mcq'?`<div class="grid grid-cols-2 gap-2">${[0,1,2,3].map(o=>`<input id="bq_opt_${idx}_${o}" value="${((q.options&&q.options[o])||'').replace(/"/g,'&quot;')}" placeholder="Choice ${o+1}" class="px-2 py-1 rounded border text-xs"/>`).join("")}</div><select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs">${[0,1,2,3].map(o=>`<option value="${o}" ${String(q.correctAnswer)===String(o)?'selected':''}>Choice ${o+1}</option>`).join("")}</select>`:q.type==='tf'?`<select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs"><option value="True" ${q.correctAnswer==='True'?'selected':''}>True</option><option value="False" ${q.correctAnswer==='False'?'selected':''}>False</option></select>`:q.type==='fill'?`<input id="bq_corr_${idx}" value="${(q.correctAnswer||'').replace(/"/g,'&quot;')}" placeholder="Correct answer" class="w-full px-2 py-1 rounded border text-xs"/>`:''}</div>`).join("")}
                     <button class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-xs">Save Assignment ✓</button>
@@ -1055,7 +1169,7 @@
 
                 <div class="space-y-3">${subjectRoadmap.map(item => {
                   const isL = item.kind === "lesson", obj = item.data, isDraft = obj.studentId === SANDBOX_STUDENT_ID;
-                  return `<div class="p-4 rounded-2xl border ${isDraft ? 'bg-amberwarm-50/40 border-amberwarm-400/50' : 'bg-white'} ${!isL ? 'sm:ml-6' : ''} flex flex-wrap justify-between items-center gap-2"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded ${isL ? 'bg-tealhub-500 text-white' : 'bg-slate-100'} mr-1.5">${isL ? '📖 Lesson' : obj.type}</span><span class="text-[11px] font-bold px-2 py-0.5 rounded ${isDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100'}">${isDraft ? '🧪 Sandbox Draft' : (getStudentById(obj.studentId)?.name || 'All')}</span><p class="font-bold text-sm mt-1">${obj.title}</p></div><div class="flex flex-wrap gap-1.5">${isDraft && realStudents[0] ? `<button onclick="assignSandboxDraftToStudent('${item.kind}','${obj.id}','${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold">🚀 Assign to ${realStudents[0].name}</button>` : ''}<button onclick="previewItemInStudentView('${item.kind}','${obj.id}','${obj.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 text-xs font-bold">👁 Preview</button><button onclick="${isL ? `startEditLesson('${obj.id}')` : `startEditAssignment('${obj.id}')`}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">✎ Edit</button><button onclick="deleteItem('${item.kind}','${obj.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-red-500 text-xs font-bold">✕</button></div></div>`;
+                  return `<div class="p-4 rounded-2xl border ${isDraft ? 'bg-amberwarm-50/40 border-amberwarm-400/50' : 'bg-white'} ${!isL ? 'sm:ml-6' : ''} flex flex-wrap justify-between items-center gap-2"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded ${isL ? 'bg-tealhub-500 text-white' : 'bg-slate-100'} mr-1.5">${isL ? '📖 Lesson' : obj.type}</span><span class="text-[11px] font-bold px-2 py-0.5 rounded ${isDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100'}">${isDraft ? '🧪 Sandbox Draft' : (getStudentById(obj.studentId)?.name || 'All')}</span>${!isL && isWorkUploadRequired(obj) ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 ml-1">📎 Upload Req</span>` : ''}<p class="font-bold text-sm mt-1">${obj.title}</p></div><div class="flex flex-wrap gap-1.5">${isDraft && realStudents[0] ? `<button onclick="assignSandboxDraftToStudent('${item.kind}','${obj.id}','${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold">🚀 Assign to ${realStudents[0].name}</button>` : ''}<button onclick="previewItemInStudentView('${item.kind}','${obj.id}','${obj.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 text-xs font-bold">👁 Preview</button><button onclick="${isL ? `startEditLesson('${obj.id}')` : `startEditAssignment('${obj.id}')`}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">✎ Edit</button><button onclick="deleteItem('${item.kind}','${obj.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-red-500 text-xs font-bold">✕</button></div></div>`;
                 }).join("") || '<p class="text-xs text-slate-400 text-center py-6">No items yet.</p>'}</div>
               </div>
             </div>` : ''}
@@ -1072,7 +1186,7 @@
           ${parentTab === "gradebook" ? `
             <div class="space-y-6">
               <div class="flex flex-wrap justify-between items-center gap-2"><div class="flex flex-wrap gap-2">${["All", ...allStudents.map(s=>s.id)].map(id => `<button onclick="setParentStudentFilter('${id}')" class="px-3 py-1 rounded-full text-xs font-bold ${parentStudentFilter===id?'bg-tealhub-500 text-white':'bg-slate-100'}">${id==="All"?"All Students":getStudentById(id)?.name}</button>`).join("")}</div><button onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-slate-100 text-xs font-bold">⬇ Export Grades (CSV)</button></div>
-              <div class="rounded-2xl border overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Student</th><th class="p-3">Subject</th><th class="p-3">Item</th><th class="p-3">Status</th><th class="p-3">Score</th><th class="p-3">Alert Reason</th><th class="p-3 text-right">Actions</th></tr></thead><tbody class="divide-y">${allStudents.filter(s=>parentStudentFilter==="All"||s.id===parentStudentFilter).flatMap(stu=>(appState.assignments||[]).filter(a=>isAssignmentVisibleToStudent(a,stu.id)).map(a=>{const sk=getSubKey(stu.id,a.id), sub=subs[sk], tot=a.questions.reduce((acc,q)=>acc+Number(q.points||0),0), viol=sub?.violations||[]; return `<tr><td class="p-3 font-bold">${stu.name}</td><td class="p-3">${a.subject}</td><td class="p-3">${a.title}</td><td class="p-3 text-xs">${sub?sub.status:'Not Started'}</td><td class="p-3 font-bold">${sub?`${sub.earnedPoints}/${tot}`:'—'}</td><td class="p-3 text-xs text-red-600">${viol.length?viol.join("; "):''}</td><td class="p-3 text-right space-x-1">${sub?`<button onclick="reopenAssignmentSubmission('${sk}')" class="px-2 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button onclick="openSubmissionReview('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold">Review</button>`:''}</td></tr>`;})).join("")}</tbody></table></div>
+              <div class="rounded-2xl border overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Student</th><th class="p-3">Subject</th><th class="p-3">Item</th><th class="p-3">Status</th><th class="p-3">Score</th><th class="p-3">Alert Reason</th><th class="p-3 text-right">Actions</th></tr></thead><tbody class="divide-y">${allStudents.filter(s=>parentStudentFilter==="All"||s.id===parentStudentFilter).flatMap(stu=>(appState.assignments||[]).filter(a=>isAssignmentVisibleToStudent(a,stu.id)).sort(compareAssignmentsChronological).map(a=>{const sk=getSubKey(stu.id,a.id), sub=subs[sk], tot=a.questions.reduce((acc,q)=>acc+Number(q.points||0),0), viol=sub?.violations||[]; return `<tr><td class="p-3 font-bold">${stu.name}</td><td class="p-3">${a.subject}</td><td class="p-3">${a.title}</td><td class="p-3 text-xs">${sub?sub.status:'Not Started'}</td><td class="p-3 font-bold">${sub?`${sub.earnedPoints}/${tot}`:'—'}</td><td class="p-3 text-xs text-red-600">${viol.length?viol.join("; "):''}</td><td class="p-3 text-right space-x-1">${sub?`<button onclick="reopenAssignmentSubmission('${sk}')" class="px-2 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button onclick="openSubmissionReview('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold">Review</button>`:''}</td></tr>`;})).join("")}</tbody></table></div>
             </div>` : ''}
 
           ${parentTab === "students" ? `
@@ -1092,7 +1206,19 @@
     function renderParentSubmissionGrader(subKey) {
       const sub = (appState.submissions || {})[subKey]; if (!sub) return "";
       const asg = appState.assignments.find(a => a.id === sub.assignmentId), stu = getStudentById(sub.studentId); if (!asg) return "";
-      return `<div class="max-w-3xl mx-auto"><div class="flex justify-between mb-4"><button onclick="closeSubmissionReview()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl">← Back</button><button onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold">↺ Reopen Assignment</button></div><div class="bg-white rounded-3xl p-6 mb-6"><span class="text-xs font-bold text-tealhub-600">${stu?.name} • ${asg.subject}</span><h2 class="text-2xl font-display font-extrabold">${asg.title}</h2>${sub.violations?.length ? `<div class="mt-3 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">⚠ Focus Alerts: ${sub.violations.join("; ")}</div>` : ''}</div><div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6"><div class="flex justify-between mb-2"><p class="font-semibold">${idx+1}. ${formatMathOption(q.prompt)}</p><div><input type="number" id="grade_q_${q.id}" value="${sub.questionScores[q.id]??0}" min="0" max="${q.points}" step="0.5" class="w-16 border rounded px-2 py-1 text-right font-bold"/> / ${q.points}</div></div><div class="p-3 rounded-xl bg-slate-50 text-sm">${q.type==='mcq'&&sub.answers[q.id]!==""?formatMathOption(q.options[Number(sub.answers[q.id])]):(sub.answers[q.id]||'—')}</div></div>`).join("")}</div><div class="mt-6 bg-white rounded-3xl p-6 space-y-3"><textarea id="grade_parent_feedback" rows="3" placeholder="Feedback..." class="w-full px-3 py-2 rounded-xl border text-sm">${sub.parentFeedback||''}</textarea><button onclick="saveParentGradeReview('${subKey}')" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Finalize Grade</button></div></div>`;
+      return `
+        <div class="max-w-3xl mx-auto">
+          <div class="flex justify-between mb-4"><button onclick="closeSubmissionReview()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl">← Back</button><button onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold">↺ Reopen Assignment</button></div>
+          <div class="bg-white rounded-3xl p-6 mb-6">
+            <span class="text-xs font-bold text-tealhub-600">${stu?.name} • ${asg.subject}</span>
+            <h2 class="text-2xl font-display font-extrabold">${asg.title}</h2>
+            ${sub.uploadedFileData ? `<div class="mt-3 p-3 rounded-xl bg-sage-50 border border-sage-100 flex justify-between items-center text-xs"><span class="font-bold text-sage-700">📄 Attached Work File: ${sub.uploadedFileName || 'Work.pdf'}</span><a href="${sub.uploadedFileData}" download="${sub.uploadedFileName || 'student-work'}" class="px-3 py-1 rounded-lg bg-ink text-white font-bold">⬇ Download File</a></div>` : ''}
+            ${sub.projectLink ? `<div class="mt-2 p-3 rounded-xl bg-sage-50 border border-sage-100 flex justify-between items-center text-xs"><span class="font-bold text-sage-700">🔗 Google Drive Link</span><a href="${sub.projectLink}" target="_blank" class="underline font-bold">Open Link ↗</a></div>` : ''}
+            ${sub.violations?.length ? `<div class="mt-3 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">⚠ Focus Alerts: ${sub.violations.join("; ")}</div>` : ''}
+          </div>
+          <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6"><div class="flex justify-between mb-2"><p class="font-semibold">${idx+1}. ${formatMathOption(q.prompt)}</p><div><input type="number" id="grade_q_${q.id}" value="${sub.questionScores[q.id]??0}" min="0" max="${q.points}" step="0.5" class="w-16 border rounded px-2 py-1 text-right font-bold"/> / ${q.points}</div></div><div class="p-3 rounded-xl bg-slate-50 text-sm">${q.type==='mcq'&&sub.answers[q.id]!==""?formatMathOption(q.options[Number(sub.answers[q.id])]):(sub.answers[q.id]||'—')}</div></div>`).join("")}</div>
+          <div class="mt-6 bg-white rounded-3xl p-6 space-y-3"><textarea id="grade_parent_feedback" rows="3" placeholder="Feedback..." class="w-full px-3 py-2 rounded-xl border text-sm">${sub.parentFeedback||''}</textarea><button onclick="saveParentGradeReview('${subKey}')" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Finalize Grade</button></div>
+        </div>`;
     }
 
     function renderPrintablePortfolioView() {
