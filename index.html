@@ -55,7 +55,7 @@
         <input type="password" id="unlock-pin-input" maxlength="8" placeholder="Enter Parent PIN" class="w-full text-center text-xl tracking-widest font-bold px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-tealhub-500 outline-none" />
         <p id="unlock-pin-error" class="text-red-600 text-xs mt-2 hidden">Incorrect Parent PIN.</p>
       </div>
-      <button onclick="attemptUnlockAssessment()" class="w-full bg-sage-500 hover:bg-sage-600 text-white font-bold py-3 rounded-xl transition shadow-sm">Verify PIN &amp; Re-Enter Full Screen</button>
+      <button type="button" onclick="attemptUnlockAssessment()" class="w-full bg-sage-500 hover:bg-sage-600 text-white font-bold py-3 rounded-xl transition shadow-sm">Verify PIN &amp; Re-Enter Full Screen</button>
     </div>
   </div>
 
@@ -64,14 +64,14 @@
     <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-xl border border-slate-200">
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-lg font-display font-extrabold text-slate-900">Parent / Teacher Access</h3>
-        <button onclick="closeParentPinModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        <button type="button" onclick="closeParentPinModal()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
       <p class="text-sm text-slate-600 mb-4">Enter your Parent PIN to open the Teacher Workspace. <span class="text-xs text-slate-400">(Default PIN: 1234)</span></p>
       <input type="password" id="parent-login-pin" maxlength="8" placeholder="••••" onkeydown="if(event.key==='Enter') verifyParentLogin()" class="w-full text-center text-2xl tracking-widest font-bold px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-tealhub-500 outline-none mb-3" />
       <p id="parent-login-error" class="text-red-600 text-xs mb-3 hidden">Incorrect PIN. Try again.</p>
       <div class="flex gap-2">
-        <button onclick="closeParentPinModal()" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50">Cancel</button>
-        <button onclick="verifyParentLogin()" class="flex-1 py-2.5 rounded-xl bg-sage-500 text-white font-bold hover:bg-sage-600">Unlock</button>
+        <button type="button" onclick="closeParentPinModal()" class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50">Cancel</button>
+        <button type="button" onclick="verifyParentLogin()" class="flex-1 py-2.5 rounded-xl bg-sage-500 text-white font-bold hover:bg-sage-600">Unlock</button>
       </div>
     </div>
   </div>
@@ -91,10 +91,10 @@
           <span class="w-2 h-2 rounded-full bg-amberwarm-500"></span> Connecting...
         </span>
         <div id="role-switcher-box" class="hidden bg-white/85 backdrop-blur p-1 rounded-2xl flex items-center text-xs sm:text-sm font-bold shadow-sm border border-white">
-          <button id="btn-role-student" onclick="switchToStudentView()" class="px-3.5 py-1.5 rounded-xl bg-tealhub-500 text-white shadow-sm transition">Student Hub</button>
-          <button id="btn-role-parent" onclick="openParentPinModal()" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:text-slate-900 transition">Parent Hub</button>
+          <button type="button" id="btn-role-student" onclick="switchToStudentView()" class="px-3.5 py-1.5 rounded-xl bg-tealhub-500 text-white shadow-sm transition">Student Hub</button>
+          <button type="button" id="btn-role-parent" onclick="openParentPinModal()" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:text-slate-900 transition">Parent Hub</button>
         </div>
-        <button id="btn-sign-out" onclick="signOutGoogleUser()" class="hidden text-xs font-bold text-slate-600 hover:text-red-600 bg-white/85 hover:bg-white px-3 py-2 rounded-xl shadow-sm transition">Sign Out</button>
+        <button type="button" id="btn-sign-out" onclick="signOutGoogleUser()" class="hidden text-xs font-bold text-slate-600 hover:text-red-600 bg-white/85 hover:bg-white px-3 py-2 rounded-xl shadow-sm transition">Sign Out</button>
       </div>
     </div>
   </header>
@@ -214,7 +214,7 @@
       if (matchedHardcoded) {
         currentRole = matchedHardcoded.role || "student";
         if (currentRole === "parent") { parentUnlockedSession = true; authenticatedStudentId = SANDBOX_STUDENT_ID; }
-        else { authenticatedStudentId = matchedHardcoded.studentId || appState.settings.students[0]?.id; }
+        else { authenticatedStudentId = matchedHardcoded.studentId || appState.settings.students[0]?.id; parentUnlockedSession = false; }
         return true;
       }
       if (matchedStudentProfile) {
@@ -243,7 +243,7 @@
             activityLogs: remoteData.activityLogs || [], portfolioShowcase: remoteData.portfolioShowcase || []
           };
           if (currentGoogleUser) resolveUserAccess(currentGoogleUser);
-          localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
+          try { localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState)); } catch (e) {}
           updateHeaderChrome(); render();
         } else {
           set(dbRef, appState);
@@ -271,14 +271,20 @@
 
     function updateHeaderChrome() {
       const badge = document.getElementById("sync-status-badge"), switcher = document.getElementById("role-switcher-box"), signOutBtn = document.getElementById("btn-sign-out"), emailSub = document.getElementById("header-user-email");
+      const canSeeParentSwitcher = Boolean(parentUnlockedSession || currentRole === "parent");
+
       if (authStatus === "authorized" && currentGoogleUser) {
         badge.className = "hidden sm:inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-white/90 text-sage-700 shadow-sm";
         badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-sage-500 animate-pulse"></span> Google Cloud Synced`;
-        switcher.classList.remove("hidden"); signOutBtn.classList.remove("hidden"); emailSub.textContent = `Signed in as ${currentGoogleUser.email}`;
+        switcher.classList.toggle("hidden", !canSeeParentSwitcher);
+        signOutBtn.classList.remove("hidden");
+        emailSub.textContent = `Signed in as ${currentGoogleUser.email}`;
       } else if (authStatus === "demo") {
-        switcher.classList.remove("hidden"); signOutBtn.classList.add("hidden");
+        switcher.classList.toggle("hidden", !canSeeParentSwitcher);
+        signOutBtn.classList.add("hidden");
       } else {
-        switcher.classList.add("hidden"); signOutBtn.classList.toggle("hidden", !currentGoogleUser);
+        switcher.classList.add("hidden");
+        signOutBtn.classList.toggle("hidden", !currentGoogleUser);
       }
       updateRoleButtons();
     }
@@ -306,10 +312,22 @@
       if (!appState.resources) appState.resources = [];
       if (!appState.settings.announcements) appState.settings.announcements = [];
       if (!appState.settings.subjectDetails) appState.settings.subjectDetails = {};
-      localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
-      render(); showSavedToast(toastMessage);
+
+      try {
+        localStorage.setItem("sunshine_homeschool_state_v5", JSON.stringify(appState));
+      } catch (storageErr) {
+        console.warn("Mobile Safari localStorage quota exceeded; syncing directly to cloud:", storageErr);
+      }
+
+      render();
+      showSavedToast(toastMessage);
+
       if (isFirebaseConfigured && dbRef && authStatus === "authorized" && hasInitialCloudSync) {
-        set(dbRef, appState).catch(err => alert("Cloud sync error: " + err.message));
+        const cleanPayload = JSON.parse(JSON.stringify(appState));
+        set(dbRef, cleanPayload).catch(err => {
+          console.error("Firebase write failed:", err);
+          showSavedToast("Sync error: " + err.message);
+        });
       }
     }
 
@@ -322,7 +340,6 @@
     }
     function getSubKey(studentId, assignmentId) { return `${studentId}_${assignmentId}`; }
 
-    // Student visibility respects BOTH studentId assignment AND the student's enrolled subjects
     function isLessonVisibleToStudent(lesson, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
       if (lesson.studentId === SANDBOX_STUDENT_ID) return false;
@@ -461,7 +478,7 @@
       return match ? `https://www.youtube.com/embed/${match[1]}` : null;
     }
 
-    // Strict Mode Listeners (Whitelists native file picker dialog)
+    // Strict Mode Listeners (Whitelists native iOS/desktop file picker dialog)
     function handleVisibilityOrBlur(reason) {
       if (isFilePickerOpen) return;
       if (!strictSession.active || !strictSession.unlockedStarted || strictSession.pausedLocked) return;
@@ -511,6 +528,7 @@
     window.updateStudentSearch = (val) => { studentSearchQuery = val; render(); const inp = document.getElementById("stu-search-box"); if (inp) { inp.focus(); inp.setSelectionRange(val.length, val.length); } };
 
     window.openParentPinModal = () => {
+      if (!parentUnlockedSession && currentRole !== "parent") return;
       if (currentRole === "parent") return;
       if (parentUnlockedSession) { exitStrictSessionCleanup(); currentRole = "parent"; activeLessonId = null; activeAssignmentId = null; printableRecord = null; updateRoleButtons(); render(); return; }
       document.getElementById("parent-login-pin").value = ""; document.getElementById("parent-login-error").classList.add("hidden"); document.getElementById("parent-pin-modal").classList.remove("hidden");
@@ -557,7 +575,7 @@
       saveState("Checklist updated!");
     };
 
-    // Student Actions & Whitelisted File Upload
+    // Student Actions & iOS Safari-Safe File Upload + Submit
     window.openLesson = (id) => { activeLessonId = id; activeAssignmentId = null; printableRecord = null; render(); };
     window.submitLessonCheck = (id) => {
       const l = (appState.lessons || []).find(x => x.id === id), sel = document.querySelector('input[name="lesson-check-opt"]:checked'), fb = document.getElementById("lesson-check-feedback");
@@ -584,16 +602,40 @@
       isFilePickerOpen = false;
       const file = e.target.files?.[0];
       if (!file) return;
+      const badge = document.getElementById("uploaded-file-badge");
+      if (badge) { badge.className = "text-xs font-bold text-slate-600"; badge.textContent = `⏳ Processing ${file.name}...`; }
+
+      if (file.type.startsWith("image/")) {
+        const img = new Image();
+        const objUrl = URL.createObjectURL(file);
+        img.onload = () => {
+          const maxDim = 1400;
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.78);
+          URL.revokeObjectURL(objUrl);
+          pendingUploadedWorkFile = { name: file.name.replace(/\.[^.]+$/, ".jpg"), dataUrl: compressedDataUrl };
+          if (badge) { badge.className = "text-xs font-bold text-sage-700"; badge.textContent = `✓ Attached: ${pendingUploadedWorkFile.name}`; }
+        };
+        img.src = objUrl;
+        return;
+      }
+
       if (file.size > 4 * 1024 * 1024) {
-        alert("File is larger than 4 MB. Please upload it to Google Drive and paste the share link instead.");
+        if (badge) { badge.className = "text-xs font-bold text-red-600"; badge.textContent = "⚠ PDF is over 4 MB — upload to Google Drive and paste the link below."; }
         e.target.value = "";
         return;
       }
       const reader = new FileReader();
       reader.onload = (ev) => {
         pendingUploadedWorkFile = { name: file.name, dataUrl: ev.target.result };
-        const badge = document.getElementById("uploaded-file-badge");
-        if (badge) badge.textContent = `✓ Attached: ${file.name}`;
+        if (badge) { badge.className = "text-xs font-bold text-sage-700"; badge.textContent = `✓ Attached: ${file.name}`; }
       };
       reader.readAsDataURL(file);
     };
@@ -618,13 +660,20 @@
       saveState("Progress saved!");
     };
     window.submitAssignment = (id) => {
-      const asg = (appState.assignments || []).find(a => a.id === id), subKey = getSubKey(authenticatedStudentId, id), prev = appState.submissions[subKey] || {};
+      const asg = (appState.assignments || []).find(a => a.id === id);
+      if (!asg) return;
+      const subKey = getSubKey(authenticatedStudentId, id), prev = (appState.submissions || {})[subKey] || {};
       const linkVal = document.getElementById("asg_project_link_input")?.value.trim() || "";
       const fileName = pendingUploadedWorkFile?.name || prev.uploadedFileName || "";
       const fileData = pendingUploadedWorkFile?.dataUrl || prev.uploadedFileData || "";
 
       if (isWorkUploadRequired(asg) && !linkVal && !fileData) {
-        alert("Work Upload Required: Please attach your PDF/photo file or paste your Google Drive link showing your written steps before submitting.");
+        const badge = document.getElementById("uploaded-file-badge");
+        if (badge) {
+          badge.className = "text-xs font-extrabold text-red-600";
+          badge.textContent = "⚠ Required: Please upload your PDF/photo or paste a Google Drive link before submitting.";
+        }
+        document.getElementById("asg_project_link_input")?.scrollIntoView({ behavior: "smooth", block: "center" });
         return;
       }
 
@@ -635,6 +684,7 @@
         if (q.type === "mcq" || q.type === "tf") { qScores[q.id] = val === String(q.correctAnswer) ? pts : 0; earned += qScores[q.id]; }
         else { manual = true; qScores[q.id] = (q.type === "fill" && q.correctAnswer && val.toLowerCase() === q.correctAnswer.trim().toLowerCase()) ? pts : 0; earned += qScores[q.id]; }
       });
+      if (!appState.submissions) appState.submissions = {};
       appState.submissions[subKey] = {
         studentId: authenticatedStudentId, assignmentId: id, status: manual ? "needs_review" : "graded",
         answers, projectLink: linkVal, uploadedFileName: fileName, uploadedFileData: fileData,
@@ -932,7 +982,6 @@
       return { myLessons, myAssignments, completedLessons, todoAssignments, inProgressAssignments, completedAssignments, subjectStats, cumulativeGpa, overallAvgPct, totalPointsEarned, overallProgressPct: totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0, totalTasks, doneTasks };
     }
 
-    // Shared Subject Progress Report Renderer (Used on BOTH Student Achievements & Parent Student Records)
     function renderSubjectProgressReportCards(student, metrics, isParentView = false) {
       const stuSubjects = getStudentSubjects(student);
       return `
@@ -988,8 +1037,8 @@
                             <div class="flex items-center justify-between">
                               <span class="text-[11px] text-slate-500">${sub.status === 'graded' ? 'Graded' : 'Awaiting Parent Review'}</span>
                               ${isParentView
-                                ? `<button onclick="openSubmissionReview('${sk}')" class="text-[11px] font-bold text-tealhub-600 underline">Review / Feedback →</button>`
-                                : `<button onclick="openAssignment('${asg.id}')" class="text-[11px] font-bold text-tealhub-600 underline">View Work &amp; Feedback →</button>`}
+                                ? `<button type="button" onclick="openSubmissionReview('${sk}')" class="text-[11px] font-bold text-tealhub-600 underline">Review / Feedback →</button>`
+                                : `<button type="button" onclick="openAssignment('${asg.id}')" class="text-[11px] font-bold text-tealhub-600 underline">View Work &amp; Feedback →</button>`}
                             </div>
                             ${sub.parentFeedback ? `<p class="text-[11px] text-amberwarm-600 font-semibold bg-amberwarm-50 px-2 py-1 rounded">💬 Teacher Note: ${sub.parentFeedback}</p>` : ''}
                           </div>
@@ -1004,7 +1053,7 @@
                         <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-b-0">
                           <span class="text-slate-700 truncate pr-2">${asg.title} <span class="text-[11px] text-slate-400">(Due ${asg.dueDate || 'N/A'})</span></span>
                           ${!isParentView
-                            ? `<button onclick="openAssignment('${asg.id}')" class="text-[11px] font-bold text-terracotta-500 hover:underline shrink-0">${status === 'in_progress' ? 'Resume' : 'Start →'}</button>`
+                            ? `<button type="button" onclick="openAssignment('${asg.id}')" class="text-[11px] font-bold text-terracotta-500 hover:underline shrink-0">${status === 'in_progress' ? 'Resume' : 'Start →'}</button>`
                             : `<span class="text-[11px] text-slate-400 shrink-0">${status === 'in_progress' ? 'In Progress' : 'To-Do'}</span>`}
                         </div>
                       `).join("")}
@@ -1035,17 +1084,17 @@
     }
 
     function renderGoogleSignInGate() {
-      return `<div class="max-w-md mx-auto my-10 bg-white rounded-3xl p-8 border border-white shadow-md text-center"><div class="w-16 h-16 rounded-full bg-amberwarm-400/20 text-amberwarm-600 flex items-center justify-center mx-auto mb-4 text-3xl">☀️</div><h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool Hub</h2><p class="text-sm text-slate-500 mt-2 mb-6">Sign in with your authorized family Gmail account.</p>${authErrorText ? `<div class="mb-5 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">${authErrorText}</div>` : ''}<button onclick="signInWithGoogle()" class="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-50 text-ink font-display font-extrabold text-sm border-2 border-slate-200 shadow-sm">Sign in with Google</button></div>`;
+      return `<div class="max-w-md mx-auto my-10 bg-white rounded-3xl p-8 border border-white shadow-md text-center"><div class="w-16 h-16 rounded-full bg-amberwarm-400/20 text-amberwarm-600 flex items-center justify-center mx-auto mb-4 text-3xl">☀️</div><h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool Hub</h2><p class="text-sm text-slate-500 mt-2 mb-6">Sign in with your authorized family Gmail account.</p>${authErrorText ? `<div class="mb-5 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">${authErrorText}</div>` : ''}<button type="button" onclick="signInWithGoogle()" class="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-50 text-ink font-display font-extrabold text-sm border-2 border-slate-200 shadow-sm">Sign in with Google</button></div>`;
     }
 
     function renderStudentPortalShell() {
       const student = getStudentById(authenticatedStudentId), metrics = computeStudentMetrics(student), pending = metrics.todoAssignments.length + metrics.inProgressAssignments.length;
       const nav = [{ id: "home", label: "Home" }, { id: "schedule", label: "Schedule" }, { id: "subjects", label: "Subjects" }, { id: "assignments", label: "Assignments", badge: pending }, { id: "resources", label: "Resources" }, { id: "portfolio", label: "Progress & Grades" }, { id: "reading", label: "Reading Log" }, { id: "activities", label: "Activities & Hours" }];
       return `
-        ${parentUnlockedSession ? `<div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm"><span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing drafts safely—your student's real account stays untouched.</span><div class="flex gap-2"><button onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 font-bold">↺ Reset Test Progress</button><button onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 font-bold">Return to Parent Hub →</button></div></div>` : ''}
+        ${parentUnlockedSession ? `<div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm"><span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing drafts safely—your student's real account stays untouched.</span><div class="flex gap-2"><button type="button" onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 font-bold">↺ Reset Test Progress</button><button type="button" onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 font-bold">Return to Parent Hub →</button></div></div>` : ''}
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-400/25">
           <nav class="flex flex-wrap items-center gap-1 sm:gap-2 py-1">
-            ${nav.map(item => `<button onclick="setStudentTab('${item.id}')" class="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-display font-bold transition flex items-center gap-1.5 ${studentTab === item.id ? 'bg-white text-ink shadow-sm underline decoration-2 decoration-tealhub-500 underline-offset-4' : 'text-slate-700 hover:bg-white/60'}"><span>${item.label}</span>${item.badge ? `<span class="px-1.5 rounded-full bg-terracotta-500 text-white text-[11px]">${item.badge}</span>` : ''}</button>`).join("")}
+            ${nav.map(item => `<button type="button" onclick="setStudentTab('${item.id}')" class="px-3 py-1.5 rounded-xl text-xs sm:text-sm font-display font-bold transition flex items-center gap-1.5 ${studentTab === item.id ? 'bg-white text-ink shadow-sm underline decoration-2 decoration-tealhub-500 underline-offset-4' : 'text-slate-700 hover:bg-white/60'}"><span>${item.label}</span>${item.badge ? `<span class="px-1.5 rounded-full bg-terracotta-500 text-white text-[11px]">${item.badge}</span>` : ''}</button>`).join("")}
           </nav>
         </div>
         ${studentTab === "home" ? renderTabHome(student, metrics) : ''}
@@ -1061,10 +1110,9 @@
 
     function renderTabHome(student, metrics) {
       const themes = [{ bg: "bg-terracotta-500", bar: "bg-amberwarm-400", icon: "🧮" }, { bg: "bg-tealhub-500", bar: "bg-tealhub-500", icon: "🧪" }, { bg: "bg-sage-500", bar: "bg-sage-500", icon: "📖" }];
-      // Deduplicate enrolled subjects and render ONLY the exact number of courses the student takes (never duplicating!)
       const activeSubjects = Array.from(new Set(getStudentSubjects(student)));
       const topThree = activeSubjects.slice(0, 3);
-      const extraSubjects = activeSubjects.slice(3); // Only populated if student has 4+ courses
+      const extraSubjects = activeSubjects.slice(3);
       const anns = appState.settings.announcements || [];
 
       const getTasks = (s) => getChronologicalTimelineForSubject(s, metrics.myLessons, metrics.myAssignments).map(item => {
@@ -1081,7 +1129,7 @@
             <div class="grid sm:grid-cols-${Math.min(3, Math.max(1, topThree.length))} gap-4">
               ${topThree.map((subj, idx) => {
                 const th = themes[idx % 3], tasks = getTasks(subj), done = tasks.filter(t => t.done).length, pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0, next = tasks.find(t => !t.done) || tasks[0];
-                return `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between"><div><div class="${th.bg} px-4 py-3.5 text-white flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl">${th.icon}</div><h3 class="font-display font-extrabold text-base leading-tight">${subj}</h3></div><div class="p-4 space-y-2.5">${tasks.slice(0,4).map(t => `<label class="flex items-start gap-2.5 text-xs sm:text-sm text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No tasks today.</p>'}</div></div><div class="px-4 pb-4 pt-1 space-y-3">${next ? `<div class="text-center"><button onclick="${next.kind === 'lesson' ? `openLesson('${next.id}')` : `openAssignment('${next.id}')`}" class="px-6 py-1.5 rounded-full bg-sage-500 text-white font-display font-bold text-xs">${next.done ? 'Review' : 'Start'}</button></div>` : ''}<div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div class="${th.bar} h-full" style="width:${pct}%"></div></div></div></div>`;
+                return `<div class="bg-white rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between"><div><div class="${th.bg} px-4 py-3.5 text-white flex items-center gap-3"><div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl">${th.icon}</div><h3 class="font-display font-extrabold text-base leading-tight">${subj}</h3></div><div class="p-4 space-y-2.5">${tasks.slice(0,4).map(t => `<label class="flex items-start gap-2.5 text-xs sm:text-sm text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No tasks today.</p>'}</div></div><div class="px-4 pb-4 pt-1 space-y-3">${next ? `<div class="text-center"><button type="button" onclick="${next.kind === 'lesson' ? `openLesson('${next.id}')` : `openAssignment('${next.id}')`}" class="px-6 py-1.5 rounded-full bg-sage-500 text-white font-display font-bold text-xs">${next.done ? 'Review' : 'Start'}</button></div>` : ''}<div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden"><div class="${th.bar} h-full" style="width:${pct}%"></div></div></div></div>`;
               }).join("")}
             </div>
 
@@ -1093,7 +1141,7 @@
                     <div class="bg-sage-500 px-5 py-3 text-white flex items-center gap-3"><span>📚</span><h3 class="font-display font-extrabold text-base">${extraSubj}</h3></div>
                     <div class="p-4 grid sm:grid-cols-2 gap-3 items-center">
                       <div class="space-y-2">${extraTasks.slice(0,3).map(t => `<label class="flex items-start gap-2 text-xs text-slate-700 cursor-pointer"><input type="checkbox" ${t.done ? 'checked' : ''} onchange="${t.kind === 'lesson' ? `quickToggleLessonFromChecklist('${t.id}')` : `openAssignment('${t.id}')`}" class="mt-0.5 w-4 h-4 accent-sage-500" /><span onclick="${t.kind === 'lesson' ? `openLesson('${t.id}')` : `openAssignment('${t.id}')`}" class="${t.done ? 'line-through text-slate-400' : 'font-medium'}">${t.title}</span></label>`).join("") || '<p class="text-xs text-slate-400 italic">No pending tasks.</p>'}</div>
-                      <div class="flex flex-col items-center justify-center gap-2 border-t sm:border-t-0 sm:border-l border-slate-100 pt-3 sm:pt-0"><button onclick="selectStudentSubject('${extraSubj}'); setStudentTab('subjects');" class="px-6 py-2 rounded-full bg-sage-500 text-white font-display font-bold text-xs">Start</button><span class="text-[11px] text-slate-500">Open Course Syllabus</span></div>
+                      <div class="flex flex-col items-center justify-center gap-2 border-t sm:border-t-0 sm:border-l border-slate-100 pt-3 sm:pt-0"><button type="button" onclick="selectStudentSubject('${extraSubj}'); setStudentTab('subjects');" class="px-6 py-2 rounded-full bg-sage-500 text-white font-display font-bold text-xs">Start</button><span class="text-[11px] text-slate-500">Open Course Syllabus</span></div>
                     </div>
                   </div>
                 `;
@@ -1101,7 +1149,7 @@
 
               <div class="${extraSubjects.length ? 'sm:col-span-5' : 'sm:col-span-12'} bg-amberwarm-400 rounded-3xl overflow-hidden shadow-sm border border-white flex flex-col justify-between">
                 <div class="bg-terracotta-500 px-4 py-2.5 text-white font-display font-extrabold text-sm">Break Timer</div>
-                <div class="p-4 flex items-center justify-between gap-3"><div class="w-14 h-14 rounded-2xl bg-white/85 flex items-center justify-center text-3xl">🐕</div><div class="text-right flex-1"><p class="text-[11px] font-bold text-ink/80">Take a Brain Break!</p><p id="break-timer-display" class="font-display font-extrabold text-3xl text-ink my-0.5">${formatTimer(breakTimerSeconds)}</p><div class="flex justify-end gap-1.5"><button onclick="toggleBreakTimer()" class="px-3 py-1 rounded-full bg-ink text-white text-[11px] font-bold">${breakTimerRunning ? 'Pause' : 'Start'}</button><button onclick="resetBreakTimer()" class="px-2.5 py-1 rounded-full bg-white/80 text-ink text-[11px] font-bold">Reset</button></div></div></div>
+                <div class="p-4 flex items-center justify-between gap-3"><div class="w-14 h-14 rounded-2xl bg-white/85 flex items-center justify-center text-3xl">🐕</div><div class="text-right flex-1"><p class="text-[11px] font-bold text-ink/80">Take a Brain Break!</p><p id="break-timer-display" class="font-display font-extrabold text-3xl text-ink my-0.5">${formatTimer(breakTimerSeconds)}</p><div class="flex justify-end gap-1.5"><button type="button" onclick="toggleBreakTimer()" class="px-3 py-1 rounded-full bg-ink text-white text-[11px] font-bold">${breakTimerRunning ? 'Pause' : 'Start'}</button><button type="button" onclick="resetBreakTimer()" class="px-2.5 py-1 rounded-full bg-white/80 text-ink text-[11px] font-bold">Reset</button></div></div></div>
               </div>
             </div>
           </div>
@@ -1109,10 +1157,10 @@
           <div class="lg:col-span-4 space-y-5">
             <h2 class="font-display font-extrabold text-xl sm:text-2xl text-ink">Quick Launchpad</h2>
             <div class="grid grid-cols-2 gap-3.5">
-              <button onclick="setStudentTab('resources')" class="bg-terracotta-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">💻</div><span class="font-display font-extrabold text-xs">Google Drive<br>&amp; Classroom</span></button>
-              <button onclick="setStudentTab('reading')" class="bg-tealhub-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📓</div><span class="font-display font-extrabold text-xs">My Digital<br>Notebook</span></button>
-              <button onclick="setStudentTab('portfolio')" class="bg-sage-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📊</div><span class="font-display font-extrabold text-xs">Progress Report<br>&amp; Grades</span></button>
-              <button onclick="setStudentTab('schedule')" class="rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center aspect-[4/3]" style="background: repeating-conic-gradient(#E67635 0% 25%, #338A94 0% 50%, #F7B552 0% 75%, #5D8A5E 0% 100%) 50% / 36px 36px;"><span class="px-3 py-1.5 rounded-xl bg-slate-900/80 text-white font-display font-extrabold text-xs">Google Calendar</span></button>
+              <button type="button" onclick="setStudentTab('resources')" class="bg-terracotta-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">💻</div><span class="font-display font-extrabold text-xs">Google Drive<br>&amp; Classroom</span></button>
+              <button type="button" onclick="setStudentTab('reading')" class="bg-tealhub-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📓</div><span class="font-display font-extrabold text-xs">My Digital<br>Notebook</span></button>
+              <button type="button" onclick="setStudentTab('portfolio')" class="bg-sage-500 text-white rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center text-center gap-2 aspect-[4/3]"><div class="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-2xl">📊</div><span class="font-display font-extrabold text-xs">Progress Report<br>&amp; Grades</span></button>
+              <button type="button" onclick="setStudentTab('schedule')" class="rounded-3xl p-4 shadow-sm flex flex-col items-center justify-center aspect-[4/3]" style="background: repeating-conic-gradient(#E67635 0% 25%, #338A94 0% 50%, #F7B552 0% 75%, #5D8A5E 0% 100%) 50% / 36px 36px;"><span class="px-3 py-1.5 rounded-xl bg-slate-900/80 text-white font-display font-extrabold text-xs">Google Calendar</span></button>
             </div>
             <div><h2 class="font-display font-extrabold text-xl text-ink mb-3">Today’s Quest</h2><div class="bg-white rounded-3xl p-5 shadow-sm space-y-3"><div class="flex items-center gap-2.5"><span class="text-2xl">⭐</span><p class="font-display font-extrabold text-base text-ink">${metrics.doneTasks} out of ${metrics.totalTasks} tasks complete!</p></div><div class="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden"><div class="bg-tealhub-500 h-full" style="width:${metrics.overallProgressPct}%"></div></div><div class="flex justify-between text-xs font-bold"><span class="text-slate-700">🌟 Awesome job, ${student.name}!</span><span class="text-tealhub-600">${metrics.overallAvgPct !== null ? `Overall: ${metrics.overallAvgPct}%` : `${metrics.totalPointsEarned} pts`}</span></div></div></div>
           </div>
@@ -1122,7 +1170,7 @@
     function renderTabSchedule(student) {
       const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
       const visibleBlocks = (appState.schedule || []).filter(b => isScheduleBlockVisibleToStudent(b, student.id));
-      return `<div class="space-y-6"><div class="bg-white rounded-3xl p-6 shadow-sm flex justify-between items-center"><div><h3 class="text-lg font-display font-extrabold text-ink">${student.name}'s Weekly Schedule</h3><p class="text-xs text-slate-500">Showing time blocks for your enrolled courses (${getStudentSubjects(student).join(", ")}).</p></div><button onclick="downloadScheduleICS('${student.id}')" class="px-4 py-2.5 rounded-xl bg-tealhub-500 text-white text-xs font-bold">📅 Export My Schedule (.ics)</button></div>${appState.settings.googleCalendarEmbedUrl ? `<div class="bg-white rounded-3xl p-5 shadow-sm"><iframe src="${appState.settings.googleCalendarEmbedUrl}" style="border:0" width="100%" height="420" frameborder="0" class="rounded-2xl"></iframe></div>` : ''}<div class="grid md:grid-cols-5 gap-4">${days.map(day => `<div class="bg-white rounded-3xl p-4 shadow-sm"><h4 class="font-display font-extrabold text-sm pb-2 mb-3 border-b">${day}</h4><div class="space-y-3">${visibleBlocks.filter(b => b.day === day).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")).map(b => `<div class="p-3 rounded-2xl border bg-slate-50 space-y-1"><p class="text-[11px] font-bold">${b.startTime} – ${b.endTime}</p><p class="font-bold text-xs">${b.title}</p><a href="${buildGoogleCalendarScheduleUrl(b)}" target="_blank" class="text-[11px] font-bold text-tealhub-600 underline">+ Google Cal ↗</a></div>`).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">Open</p>'}</div></div>`).join("")}</div></div>`;
+      return `<div class="space-y-6"><div class="bg-white rounded-3xl p-6 shadow-sm flex justify-between items-center"><div><h3 class="text-lg font-display font-extrabold text-ink">${student.name}'s Weekly Schedule</h3><p class="text-xs text-slate-500">Showing time blocks for your enrolled courses (${getStudentSubjects(student).join(", ")}).</p></div><button type="button" onclick="downloadScheduleICS('${student.id}')" class="px-4 py-2.5 rounded-xl bg-tealhub-500 text-white text-xs font-bold">📅 Export My Schedule (.ics)</button></div>${appState.settings.googleCalendarEmbedUrl ? `<div class="bg-white rounded-3xl p-5 shadow-sm"><iframe src="${appState.settings.googleCalendarEmbedUrl}" style="border:0" width="100%" height="420" frameborder="0" class="rounded-2xl"></iframe></div>` : ''}<div class="grid md:grid-cols-5 gap-4">${days.map(day => `<div class="bg-white rounded-3xl p-4 shadow-sm"><h4 class="font-display font-extrabold text-sm pb-2 mb-3 border-b">${day}</h4><div class="space-y-3">${visibleBlocks.filter(b => b.day === day).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")).map(b => `<div class="p-3 rounded-2xl border bg-slate-50 space-y-1"><p class="text-[11px] font-bold">${b.startTime} – ${b.endTime}</p><p class="font-bold text-xs">${b.title}</p><a href="${buildGoogleCalendarScheduleUrl(b)}" target="_blank" class="text-[11px] font-bold text-tealhub-600 underline">+ Google Cal ↗</a></div>`).join("") || '<p class="text-xs text-slate-400 italic text-center py-4">Open</p>'}</div></div>`).join("")}</div></div>`;
     }
 
     function renderTabSubjects(student, metrics) {
@@ -1131,12 +1179,12 @@
       const details = appState.settings.subjectDetails?.[activeCourseSubject] || {}, timeline = getChronologicalTimelineForSubject(activeCourseSubject, metrics.myLessons, metrics.myAssignments);
       return `
         <div class="grid lg:grid-cols-4 gap-6">
-          <div class="space-y-2"><p class="text-xs font-bold uppercase text-slate-600 px-1 mb-2">Enrolled Courses</p>${subjects.map(subj => `<button onclick="selectStudentSubject('${subj}')" class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm transition ${activeCourseSubject === subj ? 'bg-tealhub-500 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-white/80'}">${subj}</button>`).join("")}</div>
+          <div class="space-y-2"><p class="text-xs font-bold uppercase text-slate-600 px-1 mb-2">Enrolled Courses</p>${subjects.map(subj => `<button type="button" onclick="selectStudentSubject('${subj}')" class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm transition ${activeCourseSubject === subj ? 'bg-tealhub-500 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-white/80'}">${subj}</button>`).join("")}</div>
           <div class="lg:col-span-3 space-y-6">
             <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm"><span class="text-xs font-bold uppercase text-tealhub-600">Course Syllabus</span><h3 class="text-2xl font-display font-extrabold text-ink mt-1">${activeCourseSubject}</h3>${details.currentUnit ? `<div class="mt-3 inline-block px-3 py-1 rounded-xl bg-amberwarm-50 text-amberwarm-600 text-xs font-bold">${details.currentUnit}</div>` : ''}<div class="text-sm text-slate-600 mt-4 leading-relaxed">${details.syllabus ? formatRichText(details.syllabus) : "No syllabus added yet."}</div></div>
             <div class="bg-white rounded-3xl p-6 shadow-sm"><h4 class="font-display font-extrabold text-ink mb-4">Course Roadmap — In Chronological Order (${timeline.length})</h4><div class="space-y-3">${timeline.map(item => item.kind === "lesson"
-              ? `<div class="p-4 rounded-2xl border-l-4 border-l-tealhub-500 border bg-tealhub-500/5 flex justify-between items-center gap-3"><div><span class="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-tealhub-500 text-white mr-2">📖 Lesson</span><span class="text-xs font-bold text-slate-600">${item.data.date || ''}</span><h5 class="font-bold text-sm text-ink mt-1">${item.data.title}</h5></div><button onclick="openLesson('${item.data.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${isLessonCompletedBy(item.data, student.id) ? 'bg-emerald-100 text-emerald-800' : 'bg-tealhub-500 text-white'}">${isLessonCompletedBy(item.data, student.id) ? '✓ Completed' : 'Start Lesson →'}</button></div>`
-              : (() => { const a = item.data, sub = (appState.submissions || {})[getSubKey(student.id, a.id)], done = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(a); return `<div class="sm:ml-6 p-4 rounded-2xl border bg-slate-50/80 flex justify-between items-center gap-3"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-white border mr-1.5">${a.type}</span>${reqUp ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 mr-1.5">📎 PDF/Work Required</span>` : ''}<span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span><h5 class="font-bold text-sm text-ink mt-1">${a.title}</h5></div><button onclick="openAssignment('${a.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-sage-500 text-white'}">${done ? `✓ ${sub.earnedPoints}/${sub.totalPoints} pts` : 'Start'}</button></div>`; })()
+              ? `<div class="p-4 rounded-2xl border-l-4 border-l-tealhub-500 border bg-tealhub-500/5 flex justify-between items-center gap-3"><div><span class="text-[11px] font-extrabold uppercase px-2 py-0.5 rounded bg-tealhub-500 text-white mr-2">📖 Lesson</span><span class="text-xs font-bold text-slate-600">${item.data.date || ''}</span><h5 class="font-bold text-sm text-ink mt-1">${item.data.title}</h5></div><button type="button" onclick="openLesson('${item.data.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${isLessonCompletedBy(item.data, student.id) ? 'bg-emerald-100 text-emerald-800' : 'bg-tealhub-500 text-white'}">${isLessonCompletedBy(item.data, student.id) ? '✓ Completed' : 'Start Lesson →'}</button></div>`
+              : (() => { const a = item.data, sub = (appState.submissions || {})[getSubKey(student.id, a.id)], done = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(a); return `<div class="sm:ml-6 p-4 rounded-2xl border bg-slate-50/80 flex justify-between items-center gap-3"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-white border mr-1.5">${a.type}</span>${reqUp ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 mr-1.5">📎 PDF/Work Required</span>` : ''}<span class="text-xs text-slate-500">Due ${a.dueDate || 'N/A'}</span><h5 class="font-bold text-sm text-ink mt-1">${a.title}</h5></div><button type="button" onclick="openAssignment('${a.id}')" class="px-4 py-2 rounded-xl text-xs font-bold ${done ? 'bg-emerald-100 text-emerald-800' : 'bg-sage-500 text-white'}">${done ? `✓ ${sub.earnedPoints}/${sub.totalPoints} pts` : 'Start'}</button></div>`; })()
             ).join("") || '<p class="text-xs text-slate-400">No items in this course yet.</p>'}</div></div>
           </div>
         </div>`;
@@ -1145,7 +1193,7 @@
     function renderTabAssignments(student, metrics) {
       const lists = { todo: [...metrics.todoAssignments].sort(compareAssignmentsChronological), in_progress: [...metrics.inProgressAssignments].sort(compareAssignmentsChronological), completed: [...metrics.completedAssignments].sort(compareAssignmentsChronological) };
       const activeList = lists[assignmentFilterTab] || [];
-      return `<div class="space-y-5"><div class="flex flex-wrap gap-2">${[{ id: "todo", label: "To-Do", count: lists.todo.length }, { id: "in_progress", label: "In Progress", count: lists.in_progress.length }, { id: "completed", label: "Completed", count: lists.completed.length }].map(t => `<button onclick="assignmentFilterTab='${t.id}'; render();" class="px-4 py-2 rounded-2xl text-xs font-bold ${assignmentFilterTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-white text-slate-600'}">${t.label} (${t.count})</button>`).join("")}</div><div class="space-y-4">${activeList.map(asg => { const sub = (appState.submissions || {})[getSubKey(student.id, asg.id)], isDone = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(asg); return `<div class="bg-white rounded-3xl p-6 shadow-sm flex flex-wrap justify-between items-center gap-4"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>${asg.strictMode ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-700">🔒 Strict Mode</span>` : ''}${reqUp ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600">📎 PDF / Work Upload Required</span>` : ''}</div><h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4><span class="text-xs text-slate-500">Due <strong>${asg.dueDate || 'N/A'}</strong></span>${sub?.parentFeedback ? `<p class="text-xs text-amberwarm-600 font-semibold mt-1">💬 Teacher Feedback: ${sub.parentFeedback}</p>` : ''}</div><button onclick="openAssignment('${asg.id}')" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">${isDone ? `${sub.earnedPoints}/${sub.totalPoints} pts (View)` : 'Open'}</button></div>`; }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
+      return `<div class="space-y-5"><div class="flex flex-wrap gap-2">${[{ id: "todo", label: "To-Do", count: lists.todo.length }, { id: "in_progress", label: "In Progress", count: lists.in_progress.length }, { id: "completed", label: "Completed", count: lists.completed.length }].map(t => `<button type="button" onclick="assignmentFilterTab='${t.id}'; render();" class="px-4 py-2 rounded-2xl text-xs font-bold ${assignmentFilterTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-white text-slate-600'}">${t.label} (${t.count})</button>`).join("")}</div><div class="space-y-4">${activeList.map(asg => { const sub = (appState.submissions || {})[getSubKey(student.id, asg.id)], isDone = sub && ["graded","needs_review"].includes(sub.status), reqUp = isWorkUploadRequired(asg); return `<div class="bg-white rounded-3xl p-6 shadow-sm flex flex-wrap justify-between items-center gap-4"><div><div class="flex flex-wrap items-center gap-2 mb-1"><span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>${asg.strictMode ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-700">🔒 Strict Mode</span>` : ''}${reqUp ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600">📎 PDF / Work Upload Required</span>` : ''}</div><h4 class="text-lg font-display font-extrabold text-ink">${asg.title}</h4><span class="text-xs text-slate-500">Due <strong>${asg.dueDate || 'N/A'}</strong></span>${sub?.parentFeedback ? `<p class="text-xs text-amberwarm-600 font-semibold mt-1">💬 Teacher Feedback: ${sub.parentFeedback}</p>` : ''}</div><button type="button" onclick="openAssignment('${asg.id}')" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">${isDone ? `${sub.earnedPoints}/${sub.totalPoints} pts (View)` : 'Open'}</button></div>`; }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
     }
 
     function renderTabResources() {
@@ -1165,7 +1213,7 @@
               <input id="port_title" required placeholder="Project Title" class="w-full px-3 py-2 rounded-xl border text-xs" />
               <textarea id="port_desc" required rows="3" placeholder="What did you create or learn?" class="w-full px-3 py-2 rounded-xl border text-xs"></textarea>
               <input id="port_link" placeholder="Google Drive URL (optional)" class="w-full px-3 py-2 rounded-xl border text-xs" />
-              <button class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Pin to Showcase ★</button>
+              <button type="submit" class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Pin to Showcase ★</button>
             </form>
             <div class="lg:col-span-2 space-y-3">
               <h4 class="font-display font-extrabold text-ink">Pinned Portfolio Projects (${myShowcase.length})</h4>
@@ -1177,12 +1225,12 @@
 
     function renderTabReadingLog(student) {
       const books = (appState.readingLogs || []).filter(r => r.studentId === student.id);
-      return `<div class="grid lg:grid-cols-3 gap-6"><form onsubmit="addReadingLogEntry(event)" class="bg-white rounded-3xl p-6 space-y-3 h-fit"><h4 class="font-display font-extrabold">+ Log Finished Book (${books.length}/${appState.settings.readingGoalBooks || 20})</h4><input id="read_title" required placeholder="Book Title" class="w-full px-3 py-2 rounded-xl border text-xs" /><input id="read_author" required placeholder="Author" class="w-full px-3 py-2 rounded-xl border text-xs" /><div class="grid grid-cols-2 gap-2"><input type="number" id="read_pages" placeholder="Pages" class="px-3 py-2 rounded-xl border text-xs" /><input type="date" id="read_date" value="${new Date().toISOString().slice(0,10)}" class="px-3 py-2 rounded-xl border text-xs" /></div><select id="read_rating" class="w-full px-3 py-2 rounded-xl border text-xs"><option value="5">★★★★★ (5/5)</option><option value="4">★★★★☆ (4/5)</option><option value="3">★★★☆☆ (3/5)</option></select><textarea id="read_reflection" required rows="3" placeholder="Reflection..." class="w-full px-3 py-2 rounded-xl border text-xs"></textarea><button class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Add Book</button></form><div class="lg:col-span-2 space-y-3">${books.map(b => `<div class="bg-white rounded-3xl p-5"><h4 class="font-bold font-serif">${b.title} <span class="text-xs font-sans font-normal text-slate-500">by ${b.author}</span></h4><p class="text-sm text-slate-700 mt-2 bg-slate-50 p-3 rounded-xl">"${b.reflection}"</p></div>`).join("")}</div></div>`;
+      return `<div class="grid lg:grid-cols-3 gap-6"><form onsubmit="addReadingLogEntry(event)" class="bg-white rounded-3xl p-6 space-y-3 h-fit"><h4 class="font-display font-extrabold">+ Log Finished Book (${books.length}/${appState.settings.readingGoalBooks || 20})</h4><input id="read_title" required placeholder="Book Title" class="w-full px-3 py-2 rounded-xl border text-xs" /><input id="read_author" required placeholder="Author" class="w-full px-3 py-2 rounded-xl border text-xs" /><div class="grid grid-cols-2 gap-2"><input type="number" id="read_pages" placeholder="Pages" class="px-3 py-2 rounded-xl border text-xs" /><input type="date" id="read_date" value="${new Date().toISOString().slice(0,10)}" class="px-3 py-2 rounded-xl border text-xs" /></div><select id="read_rating" class="w-full px-3 py-2 rounded-xl border text-xs"><option value="5">★★★★★ (5/5)</option><option value="4">★★★★☆ (4/5)</option><option value="3">★★★☆☆ (3/5)</option></select><textarea id="read_reflection" required rows="3" placeholder="Reflection..." class="w-full px-3 py-2 rounded-xl border text-xs"></textarea><button type="submit" class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Add Book</button></form><div class="lg:col-span-2 space-y-3">${books.map(b => `<div class="bg-white rounded-3xl p-5"><h4 class="font-bold font-serif">${b.title} <span class="text-xs font-sans font-normal text-slate-500">by ${b.author}</span></h4><p class="text-sm text-slate-700 mt-2 bg-slate-50 p-3 rounded-xl">"${b.reflection}"</p></div>`).join("")}</div></div>`;
     }
 
     function renderTabActivities(student) {
       const acts = (appState.activityLogs || []).filter(a => a.studentId === student.id);
-      return `<div class="grid lg:grid-cols-3 gap-6"><form onsubmit="addActivityLogEntry(event)" class="bg-white rounded-3xl p-6 space-y-3 h-fit"><h4 class="font-display font-extrabold">+ Log Activity / Service Hours</h4><select id="act_type" class="w-full px-3 py-2 rounded-xl border text-xs"><option>Community Service</option><option>Club / Leadership</option><option>Sports / Athletics</option><option>Arts / Music</option></select><input id="act_org" required placeholder="Organization" class="w-full px-3 py-2 rounded-xl border text-xs" /><div class="grid grid-cols-2 gap-2"><input type="date" id="act_date" value="${new Date().toISOString().slice(0,10)}" class="px-3 py-2 rounded-xl border text-xs" /><input type="number" step="0.5" id="act_hours" required placeholder="Hours" class="px-3 py-2 rounded-xl border text-xs" /></div><textarea id="act_desc" required rows="2" placeholder="Description" class="w-full px-3 py-2 rounded-xl border text-xs"></textarea><button class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Save Hours</button></form><div class="lg:col-span-2 bg-white rounded-3xl p-5 overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr class="border-b"><th class="py-2">Date</th><th>Organization</th><th>Hours</th><th>Status</th></tr></thead><tbody>${acts.map(a => `<tr class="border-b"><td class="py-2">${a.date}</td><td><strong>${a.organization}</strong>: ${a.description}</td><td>${a.hours}</td><td>${a.verifiedByParent ? '✓ Verified' : 'Logged'}</td></tr>`).join("")}</tbody></table></div></div>`;
+      return `<div class="grid lg:grid-cols-3 gap-6"><form onsubmit="addActivityLogEntry(event)" class="bg-white rounded-3xl p-6 space-y-3 h-fit"><h4 class="font-display font-extrabold">+ Log Activity / Service Hours</h4><select id="act_type" class="w-full px-3 py-2 rounded-xl border text-xs"><option>Community Service</option><option>Club / Leadership</option><option>Sports / Athletics</option><option>Arts / Music</option></select><input id="act_org" required placeholder="Organization" class="w-full px-3 py-2 rounded-xl border text-xs" /><div class="grid grid-cols-2 gap-2"><input type="date" id="act_date" value="${new Date().toISOString().slice(0,10)}" class="px-3 py-2 rounded-xl border text-xs" /><input type="number" step="0.5" id="act_hours" required placeholder="Hours" class="px-3 py-2 rounded-xl border text-xs" /></div><textarea id="act_desc" required rows="2" placeholder="Description" class="w-full px-3 py-2 rounded-xl border text-xs"></textarea><button type="submit" class="w-full py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Save Hours</button></form><div class="lg:col-span-2 bg-white rounded-3xl p-5 overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr class="border-b"><th class="py-2">Date</th><th>Organization</th><th>Hours</th><th>Status</th></tr></thead><tbody>${acts.map(a => `<tr class="border-b"><td class="py-2">${a.date}</td><td><strong>${a.organization}</strong>: ${a.description}</td><td>${a.hours}</td><td>${a.verifiedByParent ? '✓ Verified' : 'Logged'}</td></tr>`).join("")}</tbody></table></div></div>`;
     }
 
     function renderStudentLessonDetail(lessonId) {
@@ -1190,14 +1238,14 @@
       const embedUrl = extractYouTubeEmbedUrl(les.youtubeUrl), done = isLessonCompletedBy(les, authenticatedStudentId), passed = isCheckPassedBy(les, authenticatedStudentId), req = les.checkQuestion?.enabled && !passed && !done;
       return `
         <div class="max-w-3xl mx-auto">
-          <div class="flex justify-between mb-6"><button onclick="closeStudentDetailView()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">← Back to Hub</button><button onclick="openPrintablePortfolio('lesson','${les.id}','${authenticatedStudentId}')" class="px-3.5 py-2 rounded-xl bg-white text-xs font-bold shadow-sm">🖨 Print PDF</button></div>
+          <div class="flex justify-between mb-6"><button type="button" onclick="closeStudentDetailView()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">← Back to Hub</button><button type="button" onclick="openPrintablePortfolio('lesson','${les.id}','${authenticatedStudentId}')" class="px-3.5 py-2 rounded-xl bg-white text-xs font-bold shadow-sm">🖨 Print PDF</button></div>
           <article class="bg-white rounded-3xl p-6 sm:p-10 shadow-sm">
             <span class="text-xs font-bold uppercase text-tealhub-600">${les.subject} • ${les.date || ''}</span>
             <h1 class="text-2xl sm:text-3xl font-bold text-ink mt-1 mb-6 font-serif">${les.title}</h1>
             ${embedUrl ? `<div class="aspect-video w-full rounded-2xl overflow-hidden mb-8"><iframe class="w-full h-full" src="${embedUrl}" frameborder="0" allowfullscreen></iframe></div>` : ''}
             <div class="text-slate-700 leading-relaxed text-base space-y-2">${formatRichText(les.content)}</div>
-            ${les.checkQuestion?.enabled ? `<div class="mt-8 p-6 rounded-2xl bg-amberwarm-50 border border-amberwarm-100"><h3 class="font-display font-extrabold text-ink mb-2">Check for Understanding</h3><p class="text-sm mb-3">${formatMathOption(les.checkQuestion.prompt)}</p><div class="space-y-2">${les.checkQuestion.options.map((o, i) => `<label class="flex items-center gap-3 p-3 rounded-xl bg-white border cursor-pointer"><input type="radio" name="lesson-check-opt" value="${i}" ${(passed||done)&&i===les.checkQuestion.correctIndex?'checked disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>${passed || done ? `<p class="text-sm font-bold text-emerald-700 mt-3">✓ Quick Check Passed!</p>` : `<button onclick="submitLessonCheck('${les.id}')" class="mt-4 px-4 py-2 rounded-xl bg-ink text-white text-sm font-bold">Verify Answer</button><p id="lesson-check-feedback"></p>`}</div>` : ''}
-            <div class="mt-8 pt-6 border-t flex justify-between items-center"><span class="text-sm text-slate-500">${done ? 'Completed' : 'Finished reading?'}</span>${done ? `<span class="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-sm">✓ Completed</span>` : `<button onclick="markLessonComplete('${les.id}')" ${req ? 'disabled' : ''} class="px-6 py-3 rounded-xl font-bold text-sm ${req ? 'bg-slate-200 text-slate-400' : 'bg-sage-500 text-white'}">${req ? 'Answer Quick Check First' : 'Mark Lesson Complete ✓'}</button>`}</div>
+            ${les.checkQuestion?.enabled ? `<div class="mt-8 p-6 rounded-2xl bg-amberwarm-50 border border-amberwarm-100"><h3 class="font-display font-extrabold text-ink mb-2">Check for Understanding</h3><p class="text-sm mb-3">${formatMathOption(les.checkQuestion.prompt)}</p><div class="space-y-2">${les.checkQuestion.options.map((o, i) => `<label class="flex items-center gap-3 p-3 rounded-xl bg-white border cursor-pointer"><input type="radio" name="lesson-check-opt" value="${i}" ${(passed||done)&&i===les.checkQuestion.correctIndex?'checked disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>${passed || done ? `<p class="text-sm font-bold text-emerald-700 mt-3">✓ Quick Check Passed!</p>` : `<button type="button" onclick="submitLessonCheck('${les.id}')" class="mt-4 px-4 py-2 rounded-xl bg-ink text-white text-sm font-bold">Verify Answer</button><p id="lesson-check-feedback"></p>`}</div>` : ''}
+            <div class="mt-8 pt-6 border-t flex justify-between items-center"><span class="text-sm text-slate-500">${done ? 'Completed' : 'Finished reading?'}</span>${done ? `<span class="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-sm">✓ Completed</span>` : `<button type="button" onclick="markLessonComplete('${les.id}')" ${req ? 'disabled' : ''} class="px-6 py-3 rounded-xl font-bold text-sm ${req ? 'bg-slate-200 text-slate-400' : 'bg-sage-500 text-white'}">${req ? 'Answer Quick Check First' : 'Mark Lesson Complete ✓'}</button>`}</div>
           </article>
         </div>`;
     }
@@ -1206,11 +1254,11 @@
       const asg = (appState.assignments || []).find(a => a.id === id); if (!asg) return "";
       const sub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)], isSub = sub && ["graded", "needs_review"].includes(sub.status), saved = sub?.answers || {}, reqUp = isWorkUploadRequired(asg);
       if (asg.strictMode && !isSub && !strictSession.unlockedStarted) {
-        return `<div class="max-w-lg mx-auto bg-white rounded-3xl p-8 border-2 border-slate-900 text-center my-8"><div class="text-3xl mb-3">🔒</div><h2 class="text-2xl font-display font-extrabold">${asg.title}</h2><p class="text-sm text-slate-600 my-4">Requires Full-Screen Focus Mode. Tab switches will pause the test (file uploads are permitted).</p><div class="flex gap-3"><button onclick="closeStudentDetailView()" class="flex-1 py-3 rounded-xl border font-bold text-sm">Cancel</button><button onclick="startStrictFullScreen('${asg.id}')" class="flex-1 py-3 rounded-xl bg-ink text-white font-bold text-sm">Begin Test</button></div></div>`;
+        return `<div class="max-w-lg mx-auto bg-white rounded-3xl p-8 border-2 border-slate-900 text-center my-8"><div class="text-3xl mb-3">🔒</div><h2 class="text-2xl font-display font-extrabold">${asg.title}</h2><p class="text-sm text-slate-600 my-4">Requires Full-Screen Focus Mode. Tab switches will pause the test (file uploads are permitted).</p><div class="flex gap-3"><button type="button" onclick="closeStudentDetailView()" class="flex-1 py-3 rounded-xl border font-bold text-sm">Cancel</button><button type="button" onclick="startStrictFullScreen('${asg.id}')" class="flex-1 py-3 rounded-xl bg-ink text-white font-bold text-sm">Begin Test</button></div></div>`;
       }
       return `
         <div class="max-w-3xl mx-auto ${asg.strictMode && !isSub ? 'strict-locked-content' : ''}">
-          <div class="flex justify-between mb-6">${!asg.strictMode || isSub ? `<button onclick="closeStudentDetailView()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">← Back to Hub</button>` : `<span class="text-xs font-bold text-red-600 bg-white px-3 py-1.5 rounded-full">🔒 Focus Monitoring Active</span>`}</div>
+          <div class="flex justify-between mb-6">${!asg.strictMode || isSub ? `<button type="button" onclick="closeStudentDetailView()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl shadow-sm">← Back to Hub</button>` : `<span class="text-xs font-bold text-red-600 bg-white px-3 py-1.5 rounded-full">🔒 Focus Monitoring Active</span>`}</div>
           <div class="bg-white rounded-3xl p-6 shadow-sm mb-6">
             <span class="text-xs font-bold uppercase text-tealhub-600">${asg.subject} • ${asg.type}</span>
             <h1 class="text-2xl font-display font-extrabold mt-1">${asg.title}</h1>
@@ -1256,7 +1304,7 @@
             </div>
           ` : ''}
 
-          ${!isSub ? `<div class="mt-6 bg-white p-5 rounded-3xl flex justify-between gap-3">${!asg.strictMode ? `<button onclick="saveAssignmentProgress('${asg.id}')" class="px-5 py-2.5 rounded-xl border font-bold text-sm">Save Progress</button>` : '<span></span>'}<button onclick="submitAssignment('${asg.id}')" class="px-7 py-3 rounded-xl bg-sage-500 text-white font-bold text-sm">Submit ✓</button></div>` : ''}
+          ${!isSub ? `<div class="mt-6 bg-white p-5 rounded-3xl flex justify-between gap-3">${!asg.strictMode ? `<button type="button" onclick="saveAssignmentProgress('${asg.id}')" class="px-5 py-2.5 rounded-xl border font-bold text-sm">Save Progress</button>` : '<span></span>'}<button type="button" onclick="submitAssignment('${asg.id}')" class="px-7 py-3 rounded-xl bg-sage-500 text-white font-bold text-sm">Submit ✓</button></div>` : ''}
         </div>`;
     }
 
@@ -1275,21 +1323,21 @@
           <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div><h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool — Parent &amp; Teacher Hub</h2><p class="text-sm text-slate-500">2-way CSV spreadsheet sync, Sandbox drafting, individual student courses, and Annual Review folders.</p></div>
             <div class="flex flex-wrap gap-2">
-              <button onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 text-ink text-xs font-extrabold">👁 Preview Student View</button>
-              <button onclick="exportCurrentCurriculumCSV()" class="px-3.5 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">⬇ Export Curriculum (CSV)</button>
+              <button type="button" onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 text-ink text-xs font-extrabold">👁 Preview Student View</button>
+              <button type="button" onclick="exportCurrentCurriculumCSV()" class="px-3.5 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">⬇ Export Curriculum (CSV)</button>
               <label class="px-3.5 py-2 rounded-xl bg-tealhub-500 text-white text-xs font-bold cursor-pointer">⬆ Sync / Import CSV<input type="file" accept=".csv" onchange="handleCurriculumCSVUpload(event)" class="hidden" /></label>
-              <button onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border text-xs font-bold">📄 CSV Template</button>
-              <button onclick="exportJSONBackup()" class="px-3.5 py-2 rounded-xl bg-slate-50 border text-xs font-bold">⬇ Backup (JSON)</button>
+              <button type="button" onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border text-xs font-bold">📄 CSV Template</button>
+              <button type="button" onclick="exportJSONBackup()" class="px-3.5 py-2 rounded-xl bg-slate-50 border text-xs font-bold">⬇ Backup (JSON)</button>
             </div>
           </div>
 
           <div class="flex flex-wrap gap-1.5 border-b border-slate-200 pb-3 mb-6">
-            ${[{ id: "overview", label: "Overview" }, { id: "student-records", label: "Student Records" }, { id: "subjects-hub", label: "Subjects & Curriculum" }, { id: "schedule-hub", label: "Schedule & Syllabi" }, { id: "gradebook", label: "Gradebook", badge: pendingKeys.length }, { id: "students", label: "Students & PIN" }].map(t => `<button onclick="setParentTab('${t.id}')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-display font-bold flex items-center gap-1.5 ${parentTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}">${t.label}${t.badge ? `<span class="px-1.5 rounded-full bg-amberwarm-100 text-amberwarm-600 text-[11px] font-extrabold">${t.badge}</span>` : ''}</button>`).join("")}
+            ${[{ id: "overview", label: "Overview" }, { id: "student-records", label: "Student Records" }, { id: "subjects-hub", label: "Subjects & Curriculum" }, { id: "schedule-hub", label: "Schedule & Syllabi" }, { id: "gradebook", label: "Gradebook", badge: pendingKeys.length }, { id: "students", label: "Students & PIN" }].map(t => `<button type="button" onclick="setParentTab('${t.id}')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-display font-bold flex items-center gap-1.5 ${parentTab === t.id ? 'bg-tealhub-500 text-white' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}">${t.label}${t.badge ? `<span class="px-1.5 rounded-full bg-amberwarm-100 text-amberwarm-600 text-[11px] font-extrabold">${t.badge}</span>` : ''}</button>`).join("")}
           </div>
 
           ${parentTab === "overview" ? `
-            ${pendingKeys.length ? `<div class="mb-6 p-5 rounded-2xl bg-amberwarm-50 border border-amberwarm-100"><h3 class="font-bold text-amberwarm-600 text-xs uppercase mb-3">Awaiting Grading</h3><div class="space-y-2">${pendingKeys.map(k => { const sub = subs[k], asg = appState.assignments.find(a => a.id === sub.assignmentId), stu = getStudentById(sub.studentId); return asg ? `<div class="bg-white p-3.5 rounded-xl flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${stu?.name} • ${asg.subject}</span><p class="font-bold text-sm">${asg.title}</p></div><button onclick="openSubmissionReview('${k}')" class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold">Review →</button></div>` : ''; }).join("")}</div></div>` : ''}
-            <form onsubmit="addAnnouncement(event)" class="bg-slate-50 p-5 rounded-2xl border mb-6 grid sm:grid-cols-4 gap-3"><input id="ann_title" required placeholder="Announcement Headline" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="ann_body" required placeholder="Message..." class="sm:col-span-2 px-3 py-2 rounded-xl border text-xs bg-white"/><button class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold">Post Note</button></form>
+            ${pendingKeys.length ? `<div class="mb-6 p-5 rounded-2xl bg-amberwarm-50 border border-amberwarm-100"><h3 class="font-bold text-amberwarm-600 text-xs uppercase mb-3">Awaiting Grading</h3><div class="space-y-2">${pendingKeys.map(k => { const sub = subs[k], asg = appState.assignments.find(a => a.id === sub.assignmentId), stu = getStudentById(sub.studentId); return asg ? `<div class="bg-white p-3.5 rounded-xl flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${stu?.name} • ${asg.subject}</span><p class="font-bold text-sm">${asg.title}</p></div><button type="button" onclick="openSubmissionReview('${k}')" class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold">Review →</button></div>` : ''; }).join("")}</div></div>` : ''}
+            <form onsubmit="addAnnouncement(event)" class="bg-slate-50 p-5 rounded-2xl border mb-6 grid sm:grid-cols-4 gap-3"><input id="ann_title" required placeholder="Announcement Headline" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="ann_body" required placeholder="Message..." class="sm:col-span-2 px-3 py-2 rounded-xl border text-xs bg-white"/><button type="submit" class="px-4 py-2 rounded-xl bg-terracotta-500 text-white text-xs font-bold">Post Note</button></form>
             <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">${allSubjects.map(s => `<div onclick="selectParentSubjectTab('${s}'); parentTab='subjects-hub'; render();" class="p-5 rounded-2xl border bg-slate-50 hover:bg-white cursor-pointer"><span class="text-xs font-bold text-tealhub-600">Course</span><h4 class="font-display font-extrabold text-ink mt-1">${s}</h4><p class="text-xs text-slate-500 mt-1">${(appState.lessons||[]).filter(l=>l.subject===s).length} Lessons • ${(appState.assignments||[]).filter(a=>a.subject===s).length} Assignments</p></div>`).join("")}</div>
           ` : ''}
 
@@ -1297,24 +1345,24 @@
             const stu = getStudentById(inspectedStudentId), metrics = computeStudentMetrics(stu);
             return `<div class="space-y-6">
               <div class="bg-slate-50 p-5 rounded-2xl border flex flex-wrap justify-between items-center gap-3">
-                <div class="flex flex-wrap gap-2">${allStudents.map(s => `<button onclick="selectInspectedStudent('${s.id}')" class="px-4 py-2 rounded-xl text-xs font-extrabold ${inspectedStudentId === s.id ? 'bg-tealhub-500 text-white' : 'bg-white border'}">${s.name} (${s.gradeLevel})</button>`).join("")}</div>
-                <button onclick="downloadOrganizedAnnualReviewZip('${stu.id}')" class="px-4 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-extrabold">📦 Download Annual Review Folder (.zip)</button>
+                <div class="flex flex-wrap gap-2">${allStudents.map(s => `<button type="button" onclick="selectInspectedStudent('${s.id}')" class="px-4 py-2 rounded-xl text-xs font-extrabold ${inspectedStudentId === s.id ? 'bg-tealhub-500 text-white' : 'bg-white border'}">${s.name} (${s.gradeLevel})</button>`).join("")}</div>
+                <button type="button" onclick="downloadOrganizedAnnualReviewZip('${stu.id}')" class="px-4 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-extrabold">📦 Download Annual Review Folder (.zip)</button>
               </div>
               <div class="flex flex-wrap gap-2">
-                ${[{ id: "overview", label: "📊 Subject Progress Report" }, { id: "submissions", label: "📝 All Assignments" }, { id: "lessons", label: "📖 Lessons" }, { id: "annual-export", label: "🗂️ Class Exports" }].map(st => `<button onclick="setStudentProfileSubTab('${st.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold ${studentProfileSubTab === st.id ? 'bg-ink text-white' : 'bg-slate-100'}">${st.label}</button>`).join("")}
+                ${[{ id: "overview", label: "📊 Subject Progress Report" }, { id: "submissions", label: "📝 All Assignments" }, { id: "lessons", label: "📖 Lessons" }, { id: "annual-export", label: "🗂️ Class Exports" }].map(st => `<button type="button" onclick="setStudentProfileSubTab('${st.id}')" class="px-3.5 py-2 rounded-xl text-xs font-bold ${studentProfileSubTab === st.id ? 'bg-ink text-white' : 'bg-slate-100'}">${st.label}</button>`).join("")}
               </div>
               ${studentProfileSubTab === "overview" ? renderSubjectProgressReportCards(stu, metrics, true) : ''}
-              ${studentProfileSubTab === "submissions" ? `<div class="space-y-2">${metrics.myAssignments.map(a => { const sk = getSubKey(stu.id, a.id), sub = subs[sk]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${a.subject}</span><p class="font-bold text-sm">${a.title}</p>${sub?.violations?.length ? `<p class="text-xs text-red-600 font-bold">⚠ ${sub.violations.join("; ")}</p>` : ''}</div><div class="flex gap-2">${sub ? `<button onclick="reopenAssignmentSubmission('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button onclick="openSubmissionReview('${sk}')" class="px-3 py-1 rounded border text-xs font-bold">Review</button>` : '<span class="text-xs text-slate-400">Not Started</span>'}</div></div>`; }).join("")}</div>` : ''}
-              ${studentProfileSubTab === "lessons" ? `<div class="space-y-2">${metrics.myLessons.map(l => { const done = l.completedBy?.[stu.id]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${l.subject}</span><p class="font-bold text-sm">${l.title}</p></div><div>${done ? `<span class="text-xs font-bold text-emerald-700 mr-2">✓ Completed</span><button onclick="resetLessonCompletion('${l.id}','${stu.id}')" class="px-2.5 py-1 rounded border text-xs">↺ Reopen</button>` : '<span class="text-xs text-slate-400">Pending</span>'}</div></div>`; }).join("")}</div>` : ''}
-              ${studentProfileSubTab === "annual-export" ? `<div class="grid sm:grid-cols-2 gap-3">${getStudentSubjects(stu).map(subj => `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><strong>${subj}</strong><button onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold">🖨 Open / PDF</button></div>`).join("")}</div>` : ''}
+              ${studentProfileSubTab === "submissions" ? `<div class="space-y-2">${metrics.myAssignments.map(a => { const sk = getSubKey(stu.id, a.id), sub = subs[sk]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${a.subject}</span><p class="font-bold text-sm">${a.title}</p>${sub?.violations?.length ? `<p class="text-xs text-red-600 font-bold">⚠ ${sub.violations.join("; ")}</p>` : ''}</div><div class="flex gap-2">${sub ? `<button type="button" onclick="reopenAssignmentSubmission('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button type="button" onclick="openSubmissionReview('${sk}')" class="px-3 py-1 rounded border text-xs font-bold">Review</button>` : '<span class="text-xs text-slate-400">Not Started</span>'}</div></div>`; }).join("")}</div>` : ''}
+              ${studentProfileSubTab === "lessons" ? `<div class="space-y-2">${metrics.myLessons.map(l => { const done = l.completedBy?.[stu.id]; return `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><div><span class="text-xs font-bold text-tealhub-600">${l.subject}</span><p class="font-bold text-sm">${l.title}</p></div><div>${done ? `<span class="text-xs font-bold text-emerald-700 mr-2">✓ Completed</span><button type="button" onclick="resetLessonCompletion('${l.id}','${stu.id}')" class="px-2.5 py-1 rounded border text-xs">↺ Reopen</button>` : '<span class="text-xs text-slate-400">Pending</span>'}</div></div>`; }).join("")}</div>` : ''}
+              ${studentProfileSubTab === "annual-export" ? `<div class="grid sm:grid-cols-2 gap-3">${getStudentSubjects(stu).map(subj => `<div class="p-4 rounded-2xl border bg-white flex justify-between items-center"><strong>${subj}</strong><button type="button" onclick="const w=window.open('','_blank'); w.document.write(buildClassPortfolioHTML(getStudentById('${stu.id}'), '${subj}', computeStudentMetrics(getStudentById('${stu.id}')))); w.document.close();" class="px-3 py-1.5 rounded-xl bg-ink text-white text-xs font-bold">🖨 Open / PDF</button></div>`).join("")}</div>` : ''}
             </div>`;
           })() : ''}
 
           ${parentTab === "subjects-hub" ? `
             <div class="grid lg:grid-cols-4 gap-6">
-              <div class="space-y-2">${allSubjects.map(s => `<button onclick="selectParentSubjectTab('${s}')" class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm ${parentSubjectTab === s ? 'bg-tealhub-500 text-white' : 'bg-slate-50 text-slate-700'}">${s}</button>`).join("")}</div>
+              <div class="space-y-2">${allSubjects.map(s => `<button type="button" onclick="selectParentSubjectTab('${s}')" class="w-full text-left px-4 py-3 rounded-2xl font-display font-bold text-sm ${parentSubjectTab === s ? 'bg-tealhub-500 text-white' : 'bg-slate-50 text-slate-700'}">${s}</button>`).join("")}</div>
               <div class="lg:col-span-3 space-y-5">
-                <div class="flex flex-wrap justify-between items-center gap-3 bg-slate-50 p-5 rounded-2xl border"><h3 class="text-xl font-display font-extrabold">${parentSubjectTab}</h3><div class="flex gap-2"><button onclick="openNewLessonInSubject('${parentSubjectTab}')" class="px-4 py-2 rounded-xl bg-tealhub-500 text-white text-xs font-bold">+ New Lesson</button><button onclick="openNewAssignmentInSubject('${parentSubjectTab}')" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">+ New Homework / Quiz</button></div></div>
+                <div class="flex flex-wrap justify-between items-center gap-3 bg-slate-50 p-5 rounded-2xl border"><h3 class="text-xl font-display font-extrabold">${parentSubjectTab}</h3><div class="flex gap-2"><button type="button" onclick="openNewLessonInSubject('${parentSubjectTab}')" class="px-4 py-2 rounded-xl bg-tealhub-500 text-white text-xs font-bold">+ New Lesson</button><button type="button" onclick="openNewAssignmentInSubject('${parentSubjectTab}')" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">+ New Homework / Quiz</button></div></div>
 
                 ${parentSubjectEditorMode === "lesson" ? `
                   <form onsubmit="publishNewLesson(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-4">
@@ -1325,7 +1373,7 @@
                     <div class="grid sm:grid-cols-2 gap-3"><input id="les_youtube" placeholder="YouTube URL (optional)" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="les_link" placeholder="Resource URL (optional)" class="px-3 py-2 rounded-xl border text-xs bg-white"/></div>
                     <input id="les_image" placeholder="Image URL (optional)" class="w-full px-3 py-2 rounded-xl border text-xs bg-white"/>
                     <div class="p-4 rounded-xl bg-white border space-y-2"><label class="text-xs font-bold"><input type="checkbox" id="les_check_enabled" checked/> Quick Check Question</label><input id="les_check_prompt" placeholder="Prompt" class="w-full px-3 py-1.5 rounded border text-xs"/><div class="grid grid-cols-2 gap-2">${[0,1,2,3].map(i=>`<input id="les_check_opt${i}" placeholder="Option ${i+1}" class="px-2 py-1 rounded border text-xs"/>`).join("")}</div><select id="les_check_correct" class="px-2 py-1 rounded border text-xs"><option value="0">Option 1</option><option value="1">Option 2</option><option value="2">Option 3</option><option value="3">Option 4</option></select></div>
-                    <button class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-xs">Save Lesson ✓</button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-xs">Save Lesson ✓</button>
                   </form>` : ''}
 
                 ${parentSubjectEditorMode === "assignment" ? `
@@ -1340,12 +1388,12 @@
                     </div>
                     <div class="flex gap-1.5"><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ MCQ</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ T/F</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Fill</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Open</button></div>
                     ${builderQuestions.map((q, idx) => `<div class="p-4 rounded-xl bg-white border space-y-2"><div class="flex justify-between text-xs font-bold"><span>Q${idx+1} (${q.type})</span><div>Pts: <input type="number" id="bq_pts_${idx}" value="${q.points}" class="w-14 border rounded px-1"/> ${builderQuestions.length>1?`<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 ml-2">✕</button>`:''}</div></div><input id="bq_prompt_${idx}" value="${(q.prompt||'').replace(/"/g,'&quot;')}" placeholder="Question prompt" class="w-full px-3 py-1.5 rounded border text-xs"/>${q.type==='mcq'?`<div class="grid grid-cols-2 gap-2">${[0,1,2,3].map(o=>`<input id="bq_opt_${idx}_${o}" value="${((q.options&&q.options[o])||'').replace(/"/g,'&quot;')}" placeholder="Choice ${o+1}" class="px-2 py-1 rounded border text-xs"/>`).join("")}</div><select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs">${[0,1,2,3].map(o=>`<option value="${o}" ${String(q.correctAnswer)===String(o)?'selected':''}>Choice ${o+1}</option>`).join("")}</select>`:q.type==='tf'?`<select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs"><option value="True" ${q.correctAnswer==='True'?'selected':''}>True</option><option value="False" ${q.correctAnswer==='False'?'selected':''}>False</option></select>`:q.type==='fill'?`<input id="bq_corr_${idx}" value="${(q.correctAnswer||'').replace(/"/g,'&quot;')}" placeholder="Correct answer" class="w-full px-2 py-1 rounded border text-xs"/>`:''}</div>`).join("")}
-                    <button class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-xs">Save Assignment ✓</button>
+                    <button type="submit" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-xs">Save Assignment ✓</button>
                   </form>` : ''}
 
                 <div class="space-y-3">${subjectRoadmap.map(item => {
                   const isL = item.kind === "lesson", obj = item.data, isDraft = obj.studentId === SANDBOX_STUDENT_ID;
-                  return `<div class="p-4 rounded-2xl border ${isDraft ? 'bg-amberwarm-50/40 border-amberwarm-400/50' : 'bg-white'} ${!isL ? 'sm:ml-6' : ''} flex flex-wrap justify-between items-center gap-2"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded ${isL ? 'bg-tealhub-500 text-white' : 'bg-slate-100'} mr-1.5">${isL ? '📖 Lesson' : obj.type}</span><span class="text-[11px] font-bold px-2 py-0.5 rounded ${isDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100'}">${isDraft ? '🧪 Sandbox Draft' : (getStudentById(obj.studentId)?.name || 'All')}</span>${!isL && isWorkUploadRequired(obj) ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 ml-1">📎 Upload Req</span>` : ''}<p class="font-bold text-sm mt-1">${obj.title}</p></div><div class="flex flex-wrap gap-1.5">${isDraft && realStudents[0] ? `<button onclick="assignSandboxDraftToStudent('${item.kind}','${obj.id}','${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold">🚀 Assign to ${realStudents[0].name}</button>` : ''}<button onclick="previewItemInStudentView('${item.kind}','${obj.id}','${obj.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 text-xs font-bold">👁 Preview</button><button onclick="${isL ? `startEditLesson('${obj.id}')` : `startEditAssignment('${obj.id}')`}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">✎ Edit</button><button onclick="deleteItem('${item.kind}','${obj.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-red-500 text-xs font-bold">✕</button></div></div>`;
+                  return `<div class="p-4 rounded-2xl border ${isDraft ? 'bg-amberwarm-50/40 border-amberwarm-400/50' : 'bg-white'} ${!isL ? 'sm:ml-6' : ''} flex flex-wrap justify-between items-center gap-2"><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded ${isL ? 'bg-tealhub-500 text-white' : 'bg-slate-100'} mr-1.5">${isL ? '📖 Lesson' : obj.type}</span><span class="text-[11px] font-bold px-2 py-0.5 rounded ${isDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100'}">${isDraft ? '🧪 Sandbox Draft' : (getStudentById(obj.studentId)?.name || 'All')}</span>${!isL && isWorkUploadRequired(obj) ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 ml-1">📎 Upload Req</span>` : ''}<p class="font-bold text-sm mt-1">${obj.title}</p></div><div class="flex flex-wrap gap-1.5">${isDraft && realStudents[0] ? `<button type="button" onclick="assignSandboxDraftToStudent('${item.kind}','${obj.id}','${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold">🚀 Assign to ${realStudents[0].name}</button>` : ''}<button type="button" onclick="previewItemInStudentView('${item.kind}','${obj.id}','${obj.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 text-xs font-bold">👁 Preview</button><button type="button" onclick="${isL ? `startEditLesson('${obj.id}')` : `startEditAssignment('${obj.id}')`}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">✎ Edit</button><button type="button" onclick="deleteItem('${item.kind}','${obj.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-red-500 text-xs font-bold">✕</button></div></div>`;
                 }).join("") || '<p class="text-xs text-slate-400 text-center py-6">No items yet.</p>'}</div>
               </div>
             </div>` : ''}
@@ -1353,7 +1401,7 @@
           ${parentTab === "schedule-hub" ? `
             <div class="grid lg:grid-cols-2 gap-6">
               <div class="bg-slate-50 p-6 rounded-2xl border space-y-4">
-                <div class="flex justify-between"><h3 class="font-bold">📅 Student Weekly Schedules</h3><button onclick="downloadScheduleICS()" class="px-3 py-1 rounded-xl bg-tealhub-500 text-white text-xs font-bold">⬇ .ics</button></div>
+                <div class="flex justify-between"><h3 class="font-bold">📅 Student Weekly Schedules</h3><button type="button" onclick="downloadScheduleICS()" class="px-3 py-1 rounded-xl bg-tealhub-500 text-white text-xs font-bold">⬇ .ics</button></div>
                 <form onsubmit="addScheduleBlock(event)" class="grid grid-cols-2 gap-2 bg-white p-4 rounded-xl border">
                   <select id="sch_student" class="col-span-2 px-2 py-1.5 rounded border text-xs font-bold"><option value="ALL">Assign To: All Students (Matching Courses Only)</option>${realStudents.map(s=>`<option value="${s.id}">Assign To: ${s.name} (${s.gradeLevel})</option>`).join("")}</select>
                   <select id="sch_day" class="px-2 py-1.5 rounded border text-xs"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option></select>
@@ -1362,20 +1410,20 @@
                   <input type="time" id="sch_end" value="10:00" class="px-2 py-1.5 rounded border text-xs"/>
                   <input id="sch_title" required placeholder="Block Title" class="px-2 py-1.5 rounded border text-xs"/>
                   <select id="sch_subject" class="px-2 py-1.5 rounded border text-xs">${allSubjects.map(s=>`<option>${s}</option>`).join("")}<option>All Subjects</option></select>
-                  <button class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">${editingScheduleId ? '✓ Update Block' : '+ Add Block'}</button>
+                  <button type="submit" class="col-span-2 py-2 rounded-lg bg-sage-500 text-white text-xs font-bold">${editingScheduleId ? '✓ Update Block' : '+ Add Block'}</button>
                 </form>
-                <div class="space-y-2 max-h-60 overflow-y-auto">${(appState.schedule||[]).map(b=>`<div class="p-2.5 rounded-xl bg-white border flex justify-between text-xs"><span><strong>${b.day} ${b.startTime}-${b.endTime}:</strong> ${b.title} <span class="text-tealhub-600 font-bold">(${b.studentId && b.studentId !== 'ALL' ? (getStudentById(b.studentId)?.name || 'Student') : 'All'})</span></span><div><button onclick="startEditScheduleBlock('${b.id}')" class="text-tealhub-600 font-bold mr-2">✎</button><button onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold">✕</button></div></div>`).join("")}</div>
+                <div class="space-y-2 max-h-60 overflow-y-auto">${(appState.schedule||[]).map(b=>`<div class="p-2.5 rounded-xl bg-white border flex justify-between text-xs"><span><strong>${b.day} ${b.startTime}-${b.endTime}:</strong> ${b.title} <span class="text-tealhub-600 font-bold">(${b.studentId && b.studentId !== 'ALL' ? (getStudentById(b.studentId)?.name || 'Student') : 'All'})</span></span><div><button type="button" onclick="startEditScheduleBlock('${b.id}')" class="text-tealhub-600 font-bold mr-2">✎</button><button type="button" onclick="deleteScheduleBlock('${b.id}')" class="text-red-500 font-bold">✕</button></div></div>`).join("")}</div>
               </div>
               <div class="space-y-6">
-                <form onsubmit="saveGoogleCalendarEmbed(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h3 class="font-bold">🔗 Embed Google Calendar</h3><input id="gcal_embed_input" value="${(appState.settings.googleCalendarEmbedUrl||'').replace(/"/g,'&quot;')}" placeholder="https://calendar.google.com/calendar/embed?src=..." class="w-full px-3 py-2 rounded-xl border text-xs bg-white"/><button class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold">Save Calendar Link</button></form>
-                <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h3 class="font-bold">📚 Course Syllabus &amp; Current Unit</h3><div class="flex flex-wrap gap-1.5">${allSubjects.map(s=>`<button type="button" onclick="selectParentSyllabusTab('${s}')" class="px-3 py-1 rounded-xl text-xs font-bold ${parentSyllabusSubject===s?'bg-tealhub-500 text-white':'bg-white border'}">${s}</button>`).join("")}</div><input id="syl_unit" value="${(activeSylObj.currentUnit||'').replace(/"/g,'&quot;')}" placeholder="Current Unit" class="w-full px-3 py-2 rounded-xl border text-xs bg-white font-bold"/><textarea id="syl_text" rows="3" placeholder="Syllabus overview..." class="w-full px-3 py-2 rounded-xl border text-xs bg-white">${activeSylObj.syllabus||''}</textarea><button class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">Save Syllabus ✓</button></form>
+                <form onsubmit="saveGoogleCalendarEmbed(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h3 class="font-bold">🔗 Embed Google Calendar</h3><input id="gcal_embed_input" value="${(appState.settings.googleCalendarEmbedUrl||'').replace(/"/g,'&quot;')}" placeholder="https://calendar.google.com/calendar/embed?src=..." class="w-full px-3 py-2 rounded-xl border text-xs bg-white"/><button type="submit" class="px-4 py-2 rounded-xl bg-ink text-white text-xs font-bold">Save Calendar Link</button></form>
+                <form onsubmit="saveSubjectSyllabus(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h3 class="font-bold">📚 Course Syllabus &amp; Current Unit</h3><div class="flex flex-wrap gap-1.5">${allSubjects.map(s=>`<button type="button" onclick="selectParentSyllabusTab('${s}')" class="px-3 py-1 rounded-xl text-xs font-bold ${parentSyllabusSubject===s?'bg-tealhub-500 text-white':'bg-white border'}">${s}</button>`).join("")}</div><input id="syl_unit" value="${(activeSylObj.currentUnit||'').replace(/"/g,'&quot;')}" placeholder="Current Unit" class="w-full px-3 py-2 rounded-xl border text-xs bg-white font-bold"/><textarea id="syl_text" rows="3" placeholder="Syllabus overview..." class="w-full px-3 py-2 rounded-xl border text-xs bg-white">${activeSylObj.syllabus||''}</textarea><button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">Save Syllabus ✓</button></form>
               </div>
             </div>` : ''}
 
           ${parentTab === "gradebook" ? `
             <div class="space-y-6">
-              <div class="flex flex-wrap justify-between items-center gap-2"><div class="flex flex-wrap gap-2">${["All", ...allStudents.map(s=>s.id)].map(id => `<button onclick="setParentStudentFilter('${id}')" class="px-3 py-1 rounded-full text-xs font-bold ${parentStudentFilter===id?'bg-tealhub-500 text-white':'bg-slate-100'}">${id==="All"?"All Students":getStudentById(id)?.name}</button>`).join("")}</div><button onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-slate-100 text-xs font-bold">⬇ Export Grades (CSV)</button></div>
-              <div class="rounded-2xl border overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Student</th><th class="p-3">Subject</th><th class="p-3">Item</th><th class="p-3">Status</th><th class="p-3">Score</th><th class="p-3">Alert Reason</th><th class="p-3 text-right">Actions</th></tr></thead><tbody class="divide-y">${allStudents.filter(s=>parentStudentFilter==="All"||s.id===parentStudentFilter).flatMap(stu=>(appState.assignments||[]).filter(a=>isAssignmentVisibleToStudent(a,stu.id)).sort(compareAssignmentsChronological).map(a=>{const sk=getSubKey(stu.id,a.id), sub=subs[sk], tot=a.questions.reduce((acc,q)=>acc+Number(q.points||0),0), viol=sub?.violations||[]; return `<tr><td class="p-3 font-bold">${stu.name}</td><td class="p-3">${a.subject}</td><td class="p-3">${a.title}</td><td class="p-3 text-xs">${sub?sub.status:'Not Started'}</td><td class="p-3 font-bold">${sub?`${sub.earnedPoints}/${tot}`:'—'}</td><td class="p-3 text-xs text-red-600">${viol.length?viol.join("; "):''}</td><td class="p-3 text-right space-x-1">${sub?`<button onclick="reopenAssignmentSubmission('${sk}')" class="px-2 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button onclick="openSubmissionReview('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold">Review</button>`:''}</td></tr>`;})).join("")}</tbody></table></div>
+              <div class="flex flex-wrap justify-between items-center gap-2"><div class="flex flex-wrap gap-2">${["All", ...allStudents.map(s=>s.id)].map(id => `<button type="button" onclick="setParentStudentFilter('${id}')" class="px-3 py-1 rounded-full text-xs font-bold ${parentStudentFilter===id?'bg-tealhub-500 text-white':'bg-slate-100'}">${id==="All"?"All Students":getStudentById(id)?.name}</button>`).join("")}</div><button type="button" onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-slate-100 text-xs font-bold">⬇ Export Grades (CSV)</button></div>
+              <div class="rounded-2xl border overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Student</th><th class="p-3">Subject</th><th class="p-3">Item</th><th class="p-3">Status</th><th class="p-3">Score</th><th class="p-3">Alert Reason</th><th class="p-3 text-right">Actions</th></tr></thead><tbody class="divide-y">${allStudents.filter(s=>parentStudentFilter==="All"||s.id===parentStudentFilter).flatMap(stu=>(appState.assignments||[]).filter(a=>isAssignmentVisibleToStudent(a,stu.id)).sort(compareAssignmentsChronological).map(a=>{const sk=getSubKey(stu.id,a.id), sub=subs[sk], tot=a.questions.reduce((acc,q)=>acc+Number(q.points||0),0), viol=sub?.violations||[]; return `<tr><td class="p-3 font-bold">${stu.name}</td><td class="p-3">${a.subject}</td><td class="p-3">${a.title}</td><td class="p-3 text-xs">${sub?sub.status:'Not Started'}</td><td class="p-3 font-bold">${sub?`${sub.earnedPoints}/${tot}`:'—'}</td><td class="p-3 text-xs text-red-600">${viol.length?viol.join("; "):''}</td><td class="p-3 text-right space-x-1">${sub?`<button type="button" onclick="reopenAssignmentSubmission('${sk}')" class="px-2 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button type="button" onclick="openSubmissionReview('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold">Review</button>`:''}</td></tr>`;})).join("")}</tbody></table></div>
             </div>` : ''}
 
           ${parentTab === "students" ? `
@@ -1385,9 +1433,9 @@
                   <div class="flex flex-wrap justify-between items-center gap-2"><h3 class="text-lg font-display font-extrabold">Student Accounts &amp; Individual Courses</h3><input type="search" id="stu-search-box" value="${studentSearchQuery.replace(/"/g,'&quot;')}" oninput="updateStudentSearch(this.value)" placeholder="🔍 Search students..." class="px-3 py-1.5 rounded-xl border text-xs bg-white"/></div>
                   ${filteredStudents.map(stu => `<div class="p-4 rounded-2xl bg-white border space-y-3"><div class="grid sm:grid-cols-3 gap-2"><input id="edit_stu_name_${stu.id}" value="${stu.name}" class="px-3 py-2 rounded-xl border text-xs font-bold"/><input id="edit_stu_grade_${stu.id}" value="${stu.gradeLevel}" class="px-3 py-2 rounded-xl border text-xs"/><input id="edit_stu_email_${stu.id}" value="${stu.email||''}" placeholder="student@gmail.com" class="px-3 py-2 rounded-xl border text-xs"/><input id="edit_stu_subjects_${stu.id}" value="${(stu.subjects||DEFAULT_SUBJECTS).join(', ')}" class="sm:col-span-3 px-3 py-2 rounded-xl border text-xs bg-slate-50"/></div><div class="flex justify-between items-center">${realStudents.length>1?`<button type="button" onclick="removeStudent('${stu.id}')" class="text-xs text-red-500 font-bold">Remove</button>`:'<span></span>'}<button type="button" onclick="updateStudentInfo('${stu.id}')" class="px-4 py-1.5 rounded-xl bg-ink text-white text-xs font-bold">Save Profile &amp; Courses ✓</button></div></div>`).join("")}
                 </div>
-                <form onsubmit="addNewStudent(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h4 class="font-bold text-sm">+ Add Another Student Account</h4><div class="grid sm:grid-cols-3 gap-2"><input id="new_stu_name" required placeholder="First Name" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="new_stu_grade" placeholder="Grade (e.g. 5th Grade)" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="new_stu_email" placeholder="student@gmail.com" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="new_stu_subjects" placeholder="Courses (comma-separated)" class="sm:col-span-3 px-3 py-2 rounded-xl border text-xs bg-white"/></div><button class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">+ Add Student</button></form>
+                <form onsubmit="addNewStudent(event)" class="bg-slate-50 p-6 rounded-2xl border space-y-3"><h4 class="font-bold text-sm">+ Add Another Student Account</h4><div class="grid sm:grid-cols-3 gap-2"><input id="new_stu_name" required placeholder="First Name" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="new_stu_grade" placeholder="Grade (e.g. 5th Grade)" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="new_stu_email" placeholder="student@gmail.com" class="px-3 py-2 rounded-xl border text-xs bg-white"/><input id="new_stu_subjects" placeholder="Courses (comma-separated)" class="sm:col-span-3 px-3 py-2 rounded-xl border text-xs bg-white"/></div><button type="submit" class="px-4 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">+ Add Student</button></form>
               </div>
-              <form onsubmit="saveGeneralSettings(event)" class="lg:col-span-4 bg-slate-50 p-6 rounded-2xl border space-y-4 h-fit"><h3 class="text-lg font-display font-extrabold">Parent PIN &amp; Year</h3><div><label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent PIN</label><input id="set_parent_pin" value="${appState.settings.parentPin}" maxlength="8" class="w-full px-3 py-2 rounded-xl border text-sm bg-white font-mono font-bold"/></div><div><label class="block text-xs font-bold uppercase text-slate-500 mb-1">Academic Year</label><input id="set_school_year" value="${appState.settings.schoolYear}" class="w-full px-3 py-2 rounded-xl border text-sm bg-white"/></div><div><label class="block text-xs font-bold uppercase text-slate-500 mb-1">Reading Goal</label><input type="number" id="set_reading_goal" value="${appState.settings.readingGoalBooks||20}" class="w-full px-3 py-2 rounded-xl border text-sm bg-white"/></div><button class="w-full py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Save Settings</button></form>
+              <form onsubmit="saveGeneralSettings(event)" class="lg:col-span-4 bg-slate-50 p-6 rounded-2xl border space-y-4 h-fit"><h3 class="text-lg font-display font-extrabold">Parent PIN &amp; Year</h3><div><label class="block text-xs font-bold uppercase text-slate-500 mb-1">Parent PIN</label><input id="set_parent_pin" value="${appState.settings.parentPin}" maxlength="8" class="w-full px-3 py-2 rounded-xl border text-sm bg-white font-mono font-bold"/></div><div><label class="block text-xs font-bold uppercase text-slate-500 mb-1">Academic Year</label><input id="set_school_year" value="${appState.settings.schoolYear}" class="w-full px-3 py-2 rounded-xl border text-sm bg-white"/></div><div><label class="block text-xs font-bold uppercase text-slate-500 mb-1">Reading Goal</label><input type="number" id="set_reading_goal" value="${appState.settings.readingGoalBooks||20}" class="w-full px-3 py-2 rounded-xl border text-sm bg-white"/></div><button type="submit" class="w-full py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Save Settings</button></form>
             </div>` : ''}
         </div>`;
     }
@@ -1397,7 +1445,7 @@
       const asg = appState.assignments.find(a => a.id === sub.assignmentId), stu = getStudentById(sub.studentId); if (!asg) return "";
       return `
         <div class="max-w-3xl mx-auto">
-          <div class="flex justify-between mb-4"><button onclick="closeSubmissionReview()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl">← Back</button><button onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold">↺ Reopen Assignment</button></div>
+          <div class="flex justify-between mb-4"><button type="button" onclick="closeSubmissionReview()" class="text-sm font-bold bg-white/80 px-3.5 py-2 rounded-xl">← Back</button><button type="button" onclick="reopenAssignmentSubmission('${subKey}')" class="px-3.5 py-2 rounded-xl bg-amberwarm-100 text-amberwarm-600 text-xs font-bold">↺ Reopen Assignment</button></div>
           <div class="bg-white rounded-3xl p-6 mb-6">
             <span class="text-xs font-bold text-tealhub-600">${stu?.name} • ${asg.subject}</span>
             <h2 class="text-2xl font-display font-extrabold">${asg.title}</h2>
@@ -1406,7 +1454,7 @@
             ${sub.violations?.length ? `<div class="mt-3 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">⚠ Focus Alerts: ${sub.violations.join("; ")}</div>` : ''}
           </div>
           <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6"><div class="flex justify-between mb-2"><p class="font-semibold">${idx+1}. ${formatMathOption(q.prompt)}</p><div><input type="number" id="grade_q_${q.id}" value="${sub.questionScores[q.id]??0}" min="0" max="${q.points}" step="0.5" class="w-16 border rounded px-2 py-1 text-right font-bold"/> / ${q.points}</div></div><div class="p-3 rounded-xl bg-slate-50 text-sm">${q.type==='mcq'&&sub.answers[q.id]!==""?formatMathOption(q.options[Number(sub.answers[q.id])]):(sub.answers[q.id]||'—')}</div></div>`).join("")}</div>
-          <div class="mt-6 bg-white rounded-3xl p-6 space-y-3"><textarea id="grade_parent_feedback" rows="3" placeholder="Feedback..." class="w-full px-3 py-2 rounded-xl border text-sm">${sub.parentFeedback||''}</textarea><button onclick="saveParentGradeReview('${subKey}')" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Finalize Grade</button></div>
+          <div class="mt-6 bg-white rounded-3xl p-6 space-y-3"><textarea id="grade_parent_feedback" rows="3" placeholder="Feedback..." class="w-full px-3 py-2 rounded-xl border text-sm">${sub.parentFeedback||''}</textarea><button type="button" onclick="saveParentGradeReview('${subKey}')" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-sm">Finalize Grade</button></div>
         </div>`;
     }
 
@@ -1417,7 +1465,7 @@
       else if (kind === "submission") { const a = appState.assignments.find(x => x.id === id), s = appState.submissions[getSubKey(stu.id, id)]; title = a?.title || ""; body = `<p><strong>Score:</strong> ${s?.earnedPoints}/${s?.totalPoints}</p>`; }
       else if (kind === "reading") { title = "Reading Log"; body = (appState.readingLogs||[]).filter(r=>r.studentId===stu.id).map(b=>`<p><strong>${b.title}</strong> by ${b.author}: ${b.reflection}</p>`).join(""); }
       else if (kind === "activities") { title = "Activity Hours"; body = (appState.activityLogs||[]).filter(a=>a.studentId===stu.id).map(a=>`<p>${a.date} - ${a.organization} (${a.hours} hrs): ${a.description}</p>`).join(""); }
-      return `<div class="max-w-3xl mx-auto"><div class="flex justify-between mb-4 no-print"><button onclick="closePrintablePortfolio()" class="px-3.5 py-2 rounded-xl bg-white font-bold text-sm">← Exit</button><button onclick="window.print()" class="px-5 py-2 rounded-xl bg-ink text-white font-bold text-sm">🖨 Print / Save PDF</button></div><div class="bg-white rounded-3xl p-8 print-container"><h1 class="text-2xl font-bold border-b-2 border-slate-900 pb-3 mb-4">${title} — ${stu.name}</h1><div class="space-y-3 text-sm">${body}</div></div></div>`;
+      return `<div class="max-w-3xl mx-auto"><div class="flex justify-between mb-4 no-print"><button type="button" onclick="closePrintablePortfolio()" class="px-3.5 py-2 rounded-xl bg-white font-bold text-sm">← Exit</button><button type="button" onclick="window.print()" class="px-5 py-2 rounded-xl bg-ink text-white font-bold text-sm">🖨 Print / Save PDF</button></div><div class="bg-white rounded-3xl p-8 print-container"><h1 class="text-2xl font-bold border-b-2 border-slate-900 pb-3 mb-4">${title} — ${stu.name}</h1><div class="space-y-3 text-sm">${body}</div></div></div>`;
     }
 
     window.buildClassPortfolioHTML = buildClassPortfolioHTML;
