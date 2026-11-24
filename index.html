@@ -839,6 +839,77 @@
       return rows;
     }
 
+        window.deduplicateCurriculumItems = () => {
+      if (!confirm("Scan and remove duplicate lessons, assignments, and schedule blocks? (Any items with student submissions or completions will be kept automatically.)")) return;
+      let removed = 0;
+
+      // Deduplicate Schedule by (day + startTime + subject + title)
+      const seenSch = new Set();
+      appState.schedule = (appState.schedule || []).filter(b => {
+        const k = `${b.day}||${b.startTime}||${b.subject}||${(b.title||"").toLowerCase().trim()}`;
+        if (seenSch.has(k)) { removed++; return false; }
+        seenSch.add(k); return true;
+      });
+
+      // Remove obsolete Dec 2026 placeholder Greece/Rome World History items superseded by Unit 4 & 5
+      appState.lessons = (appState.lessons || []).filter(l => {
+        const isOldPlaceholder = l.subject === "World History" && (l.date || "").startsWith("2026-12") && /greece|roman republic|pax romana/i.test(l.title || "");
+        if (isOldPlaceholder) removed++;
+        return !isOldPlaceholder;
+      });
+      appState.assignments = (appState.assignments || []).filter(a => {
+        const isOldPlaceholder = a.subject === "World History" && (a.dueDate || "").startsWith("2026-12") && /greece|roman republic|pax romana/i.test(a.title || "");
+        if (isOldPlaceholder) removed++;
+        return !isOldPlaceholder;
+      });
+
+      // Deduplicate Lessons by (subject + date), preferring ones with completions or longer content
+      const lesGroups = {};
+      (appState.lessons || []).forEach(l => {
+        const k = `${l.subject}||${l.date}||${(l.title||"").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,24)}`;
+        if (!lesGroups[k]) lesGroups[k] = [];
+        lesGroups[k].push(l);
+      });
+      const cleanLessons = [];
+      Object.values(lesGroups).forEach(arr => {
+        if (arr.length === 1) { cleanLessons.push(arr[0]); return; }
+        arr.sort((a, b) => {
+          const aDone = Object.keys(a.completedBy || {}).length, bDone = Object.keys(b.completedBy || {}).length;
+          if (bDone !== aDone) return bDone - aDone;
+          return (b.content || "").length - (a.content || "").length;
+        });
+        cleanLessons.push(arr[0]);
+        removed += (arr.length - 1);
+      });
+      appState.lessons = cleanLessons.sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+      // Deduplicate Assignments by (subject + dueDate + normalized title or check-in), preferring ones with submissions or more questions
+      const subs = appState.submissions || {};
+      const asgGroups = {};
+      (appState.assignments || []).forEach(a => {
+        const low = (a.title || "").toLowerCase().replace(/\(\d+\s*questions?\)/g, "");
+        const isCheckin = low.includes("check-in") || low.includes("review check");
+        const k = isCheckin ? `${a.subject}||${a.dueDate}||CHECKIN` : `${a.subject}||${a.dueDate}||${low.replace(/[^a-z0-9]/g,"")}`;
+        if (!asgGroups[k]) asgGroups[k] = [];
+        asgGroups[k].push(a);
+      });
+      const cleanAsgs = [];
+      Object.values(asgGroups).forEach(arr => {
+        if (arr.length === 1) { cleanAsgs.push(arr[0]); return; }
+        arr.sort((a, b) => {
+          const aHasSub = Object.keys(subs).some(sk => sk.endsWith("_" + a.id)) ? 1 : 0;
+          const bHasSub = Object.keys(subs).some(sk => sk.endsWith("_" + b.id)) ? 1 : 0;
+          if (bHasSub !== aHasSub) return bHasSub - aHasSub;
+          return (b.questions || []).length - (a.questions || []).length;
+        });
+        cleanAsgs.push(arr[0]);
+        removed += (arr.length - 1);
+      });
+      appState.assignments = cleanAsgs.sort(compareAssignmentsChronological);
+
+      saveState(removed > 0 ? `Removed ${removed} duplicate item(s)!` : "No duplicates found — curriculum is clean!");
+    };
+
     window.exportCurrentCurriculumCSV = () => {
       const out = ["RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo"];
       (appState.schedule || []).forEach(b => out.push(["Schedule", b.subject, b.title, b.day, `${b.startTime}-${b.endTime}`, b.category, "", "", "", "", b.id, b.studentId || "ALL"].map(csvEscape).join(",")));
@@ -869,14 +940,17 @@
 
           if (rec === "schedule") {
             const [startTime = "09:00", endTime = "10:00"] = (timeOrType || "09:00-10:00").split("-").map(s => s.trim());
-            const idx = itemId ? appState.schedule.findIndex(s => s.id === itemId) : -1;
-            const obj = { id: idx !== -1 ? itemId : ("sch_" + Date.now() + "_" + i), studentId: (assignedRaw || "").trim() || "ALL", day: dateOrDay || "Monday", startTime, endTime, title: title || "Study Block", category: content || "Independent Study", subject: subj };
+            const idx = appState.schedule.findIndex(s => (itemId && s.id === itemId) || (s.day === (dateOrDay || "Monday") && s.startTime === startTime && s.subject === subj));
+            const prevSch = idx !== -1 ? appState.schedule[idx] : null;
+            const obj = { id: prevSch ? prevSch.id : (itemId || ("sch_" + Date.now() + "_" + i)), studentId: (assignedRaw || "").trim() || prevSch?.studentId || "ALL", day: dateOrDay || "Monday", startTime, endTime, title: title || "Study Block", category: content || "Independent Study", subject: subj };
             if (idx !== -1) appState.schedule[idx] = obj; else appState.schedule.push(obj);
             sCount++;
           } else if (rec === "lesson") {
             const opts = optsRaw ? optsRaw.split("|").map(s => s.trim()) : [], hasCheck = Boolean(ptsRaw && opts.length >= 2);
-            const idx = itemId ? appState.lessons.findIndex(l => l.id === itemId) : -1, prev = idx !== -1 ? appState.lessons[idx] : null;
-            const obj = { id: prev ? prev.id : ("les_" + Date.now() + "_" + i), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Lesson", date: dateOrDay || "", content: (content || "").replace(/\\n/g, "\n"), youtubeUrl: prev?.youtubeUrl || "", resourceLink: prev?.resourceLink || "", imageUrl: prev?.imageUrl || "", checkQuestion: { enabled: hasCheck, prompt: hasCheck ? ptsRaw : "", options: [0,1,2,3].map(k => opts[k] || ""), correctIndex: Number(corrRaw) || 0 }, completedBy: prev?.completedBy || {}, checkPassedBy: prev?.checkPassedBy || {} };
+            const normTitle = (title || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            const idx = appState.lessons.findIndex(l => (itemId && l.id === itemId) || (l.subject === subj && l.date === (dateOrDay || "")) || (l.subject === subj && (l.title || "").toLowerCase().replace(/[^a-z0-9]/g, "") === normTitle));
+            const prev = idx !== -1 ? appState.lessons[idx] : null;
+            const obj = { id: prev ? prev.id : (itemId || ("les_" + Date.now() + "_" + i)), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Lesson", date: dateOrDay || "", content: (content || "").replace(/\\n/g, "\n"), youtubeUrl: prev?.youtubeUrl || "", resourceLink: prev?.resourceLink || "", imageUrl: prev?.imageUrl || "", checkQuestion: { enabled: hasCheck, prompt: hasCheck ? ptsRaw : "", options: [0,1,2,3].map(k => opts[k] || ""), correctIndex: Number(corrRaw) || 0 }, completedBy: prev?.completedBy || {}, checkPassedBy: prev?.checkPassedBy || {} };
             if (idx !== -1) appState.lessons[idx] = obj; else appState.lessons.push(obj);
             lCount++;
           } else if (rec === "assignment") {
@@ -886,8 +960,9 @@
             const reqUploadFlag = ptsUpper.includes("REQUIRE_UPLOAD") || ptsUpper.includes("REQUIRE_PDF") || (content || "").toLowerCase().includes("scan & upload");
             const ptsNum = parseInt((ptsRaw || "10").replace(/\D/g, ""), 10) || 10;
             if (!asgMap[key]) {
-              const prev = itemId ? appState.assignments.find(a => a.id === itemId) : null;
-              asgMap[key] = { id: prev ? prev.id : ("asg_" + Date.now() + "_" + i), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Assignment", type: timeOrType || "Homework", dueDate: dateOrDay || "", linkedLessonId: prev?.linkedLessonId || "", strictMode: strictFlag, allowProjectLink: true, requireWorkUpload: reqUploadFlag || Boolean(prev?.requireWorkUpload), questions: [] };
+              const normTitle = (title || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+              const prev = appState.assignments.find(a => (itemId && a.id === itemId) || (a.subject === subj && a.dueDate === (dateOrDay || "") && (a.title || "").toLowerCase().replace(/[^a-z0-9]/g, "") === normTitle));
+              asgMap[key] = { id: prev ? prev.id : (itemId || ("asg_" + Date.now() + "_" + i)), studentId: prev ? (assignedRaw ? targetStu : prev.studentId) : targetStu, subject: subj, title: title || "Assignment", type: timeOrType || "Homework", dueDate: dateOrDay || "", linkedLessonId: prev?.linkedLessonId || "", strictMode: strictFlag, allowProjectLink: true, requireWorkUpload: reqUploadFlag || Boolean(prev?.requireWorkUpload), questions: [] };
             } else {
               if (strictFlag) asgMap[key].strictMode = true;
               if (reqUploadFlag) asgMap[key].requireWorkUpload = true;
@@ -1337,6 +1412,7 @@
               <button type="button" onclick="switchToStudentView()" class="px-3.5 py-2 rounded-xl bg-amberwarm-400 text-ink text-xs font-extrabold">👁 Preview Student View</button>
               <button type="button" onclick="exportCurrentCurriculumCSV()" class="px-3.5 py-2 rounded-xl bg-sage-500 text-white text-xs font-bold">⬇ Export Curriculum (CSV)</button>
               <label class="px-3.5 py-2 rounded-xl bg-tealhub-500 text-white text-xs font-bold cursor-pointer">⬆ Sync / Import CSV<input type="file" accept=".csv" onchange="handleCurriculumCSVUpload(event)" class="hidden" /></label>
+              <button type="button" onclick="deduplicateCurriculumItems()" class="px-3.5 py-2 rounded-xl bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold">🧹 Remove Duplicates</button>
               <button type="button" onclick="downloadCurriculumCSVTemplate()" class="px-3.5 py-2 rounded-xl bg-slate-50 border text-xs font-bold">📄 CSV Template</button>
               <button type="button" onclick="exportJSONBackup()" class="px-3.5 py-2 rounded-xl bg-slate-50 border text-xs font-bold">⬇ Backup (JSON)</button>
             </div>
