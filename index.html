@@ -172,7 +172,10 @@
     let studentTab = "home", activeCourseSubject = getAllConfiguredSubjects()[0] || "Pre-Algebra", assignmentFilterTab = "todo";
     let parentTab = "overview", parentSubjectTab = getAllConfiguredSubjects()[0] || "Pre-Algebra", parentSubjectEditorMode = null;
     let parentTypeFilter = "ALL"; // Filter in Subjects & Curriculum: ALL | Lesson | Daily Review | Homework | Quiz | Test | Project | Extra Credit
+    let parentCurriculumStudentFilter = "ALL"; // Filter in Subjects & Curriculum: ALL | __sandbox_tester__ | stu_1 | stu_2 ...
+    let gradebookTypeFilter = "ALL"; // Filter in Gradebook: ALL | Daily Review | Homework | Quiz | Test | Project | Extra Credit
     let selectedBulkItemKeys = new Set(); // Format: "lesson:id" or "assignment:id"
+    let bulkAssignTargetId = "ALL"; // Selected target in the bulk Assign To dropdown
     let parentSyllabusSubject = getAllConfiguredSubjects()[0] || "Pre-Algebra", parentStudentFilter = "All", studentSearchQuery = "";
     let scheduleManagerStudent = "ALL", scheduleManagerDay = "ALL";
     let inspectedStudentId = appState.settings.students[0]?.id || "stu_1", studentProfileSubTab = "overview";
@@ -401,13 +404,30 @@
     }
     function getSubKey(studentId, assignmentId) { return `${studentId}_${assignmentId}`; }
 
+    function isItemAssignedToStudent(item, studentId) {
+      if (studentId === SANDBOX_STUDENT_ID) return true;
+      if (item.studentId === SANDBOX_STUDENT_ID) return false;
+      if (Array.isArray(item.assignedStudentIds) && item.assignedStudentIds.length > 0) {
+        return item.assignedStudentIds.includes("ALL") || item.assignedStudentIds.includes(studentId);
+      }
+      return !item.studentId || item.studentId === "ALL" || item.studentId === studentId;
+    }
+    function formatAssignedLabel(item) {
+      if (item.studentId === SANDBOX_STUDENT_ID) return "🧪 Sandbox Draft";
+      if (Array.isArray(item.assignedStudentIds) && item.assignedStudentIds.length > 0) {
+        if (item.assignedStudentIds.includes("ALL")) return "All Students";
+        return item.assignedStudentIds.map(id => getStudentById(id)?.name || id).join(", ");
+      }
+      if (!item.studentId || item.studentId === "ALL") return "All Students";
+      return getStudentById(item.studentId)?.name || "All Students";
+    }
     function isLessonVisibleToStudent(lesson, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
       if (lesson.studentId === SANDBOX_STUDENT_ID) return false;
       const stu = getStudentById(studentId);
       const enrolled = getStudentSubjects(stu);
       if (lesson.subject && !enrolled.includes(lesson.subject)) return false;
-      return !lesson.studentId || lesson.studentId === "ALL" || lesson.studentId === studentId;
+      return isItemAssignedToStudent(lesson, studentId);
     }
     function isAssignmentVisibleToStudent(asg, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
@@ -415,7 +435,7 @@
       const stu = getStudentById(studentId);
       const enrolled = getStudentSubjects(stu);
       if (asg.subject && !enrolled.includes(asg.subject)) return false;
-      return !asg.studentId || asg.studentId === "ALL" || asg.studentId === studentId;
+      return isItemAssignedToStudent(asg, studentId);
     }
     function isScheduleBlockVisibleToStudent(block, studentId) {
       if (studentId === SANDBOX_STUDENT_ID) return true;
@@ -864,6 +884,9 @@
     window.updateStudentSearch = (val) => { studentSearchQuery = val; render(); const inp = document.getElementById("stu-search-box"); if (inp) { inp.focus(); inp.setSelectionRange(val.length, val.length); } };
 
     window.setParentTypeFilter = (t) => { parentTypeFilter = t; selectedBulkItemKeys.clear(); render(); };
+    window.setParentCurriculumStudentFilter = (stuId) => { parentCurriculumStudentFilter = stuId; selectedBulkItemKeys.clear(); render(); };
+    window.setGradebookTypeFilter = (t) => { gradebookTypeFilter = t; render(); };
+    window.setBulkAssignTarget = (val) => { bulkAssignTargetId = val; };
     window.toggleBulkItemSelection = (key) => {
       if (selectedBulkItemKeys.has(key)) selectedBulkItemKeys.delete(key);
       else selectedBulkItemKeys.add(key);
@@ -890,11 +913,21 @@
           else if (action === "strict_off") { asg.strictMode = false; updatedCount++; }
           else if (action === "date_lock_on") { asg.lockUntilDate = true; updatedCount++; }
           else if (action === "date_lock_off") { asg.lockUntilDate = false; updatedCount++; }
-          else if (action.startsWith("assign_to:")) { asg.studentId = action.split(":")[1]; updatedCount++; }
+          else if (action.startsWith("assign_to:")) {
+            const target = action.split(":")[1];
+            asg.studentId = target;
+            asg.assignedStudentIds = target === "ALL" ? ["ALL"] : [target];
+            updatedCount++;
+          }
         } else if (kind === "lesson") {
           const les = (appState.lessons || []).find(l => l.id === id);
           if (!les) return;
-          if (action.startsWith("assign_to:")) { les.studentId = action.split(":")[1]; updatedCount++; }
+          if (action.startsWith("assign_to:")) {
+            const target = action.split(":")[1];
+            les.studentId = target;
+            les.assignedStudentIds = target === "ALL" ? ["ALL"] : [target];
+            updatedCount++;
+          }
         }
       });
       if (action === "delete_selected") {
@@ -2007,6 +2040,14 @@
       // Build chronological roadmap for selected subject, filtered by type if parentTypeFilter !== 'ALL'
       const rawSubjectRoadmap = getChronologicalTimelineForSubject(parentSubjectTab, appState.lessons || [], appState.assignments || []);
       const subjectRoadmap = rawSubjectRoadmap.filter(item => {
+        if (parentCurriculumStudentFilter !== "ALL") {
+          if (parentCurriculumStudentFilter === SANDBOX_STUDENT_ID) {
+            if (item.data.studentId !== SANDBOX_STUDENT_ID) return false;
+          } else {
+            if (item.data.studentId === SANDBOX_STUDENT_ID) return false;
+            if (!isItemAssignedToStudent(item.data, parentCurriculumStudentFilter)) return false;
+          }
+        }
         if (parentTypeFilter === "ALL") return true;
         if (parentTypeFilter === "Lesson") return item.kind === "lesson";
         return item.kind === "assignment" && (item.data.type || "").toLowerCase() === parentTypeFilter.toLowerCase();
@@ -2095,8 +2136,25 @@
                   </div>
                 </div>
 
-                <!-- ASSIGNMENT TYPE FILTER BAR + SELECT ALL -->
-                <div class="flex flex-wrap items-center justify-between gap-2 bg-white p-3.5 rounded-2xl border">
+                <!-- STUDENT + ASSIGNMENT TYPE FILTER BAR + SELECT ALL -->
+                <div class="bg-white p-4 rounded-2xl border space-y-3">
+                  <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span class="text-[11px] font-bold uppercase text-slate-400 mr-1">Filter Student:</span>
+                      ${[{ id: "ALL", name: "All Students" }, ...realStudents, { id: SANDBOX_STUDENT_ID, name: "🧪 Sandbox Drafts" }].map(st => `
+                        <button type="button" onclick="setParentCurriculumStudentFilter('${st.id}')"
+                          class="px-3 py-1 rounded-full text-xs font-bold transition ${parentCurriculumStudentFilter === st.id ? 'bg-ink text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">
+                          ${st.name}
+                        </button>
+                      `).join("")}
+                    </div>
+                    ${visibleKeys.length > 0 ? `
+                      <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer px-2">
+                        <input type="checkbox" ${allVisibleSelected ? 'checked' : ''} onchange="toggleSelectAllVisibleItems(${JSON.stringify(visibleKeys).replace(/"/g, '&quot;')})" class="w-4 h-4 accent-tealhub-500" />
+                        Select All (${visibleKeys.length})
+                      </label>
+                    ` : ''}
+                  </div>
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span class="text-[11px] font-bold uppercase text-slate-400 mr-1">Filter Type:</span>
                     ${["ALL", "Lesson", "Daily Review", "Homework", "Quiz", "Test", "Project", "Extra Credit"].map(ft => `
@@ -2106,25 +2164,27 @@
                       </button>
                     `).join("")}
                   </div>
-                  ${visibleKeys.length > 0 ? `
-                    <label class="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer px-2">
-                      <input type="checkbox" ${allVisibleSelected ? 'checked' : ''} onchange="toggleSelectAllVisibleItems(${JSON.stringify(visibleKeys).replace(/"/g, '&quot;')})" class="w-4 h-4 accent-tealhub-500" />
-                      Select All (${visibleKeys.length})
-                    </label>
-                  ` : ''}
                 </div>
 
                 <!-- BULK ACTION BAR (APPEARS WHEN 1+ ITEMS ARE CHECKED) -->
                 ${selectedBulkItemKeys.size > 0 ? `
                   <div class="p-4 rounded-2xl bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 shadow-md">
                     <span class="text-xs font-extrabold">✓ ${selectedBulkItemKeys.size} item(s) selected</span>
-                    <div class="flex flex-wrap items-center gap-1.5">
-                      <button type="button" onclick="applyBulkSettingsToSelected('require_pdf_on')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-400 text-ink text-xs font-extrabold">📎 Require PDF Upload</button>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button type="button" onclick="applyBulkSettingsToSelected('require_pdf_on')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-400 text-ink text-xs font-extrabold">📎 Require PDF</button>
                       <button type="button" onclick="applyBulkSettingsToSelected('require_pdf_off')" class="px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-bold">Optional PDF</button>
-                      <button type="button" onclick="applyBulkSettingsToSelected('date_lock_on')" class="px-2.5 py-1.5 rounded-lg bg-tealhub-500 text-white text-xs font-bold">📅 Lock Until Due Date</button>
+                      <button type="button" onclick="applyBulkSettingsToSelected('date_lock_on')" class="px-2.5 py-1.5 rounded-lg bg-tealhub-500 text-white text-xs font-bold">📅 Date-Lock</button>
                       <button type="button" onclick="applyBulkSettingsToSelected('date_lock_off')" class="px-2.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-bold">Unlock Date</button>
-                      <button type="button" onclick="applyBulkSettingsToSelected('strict_on')" class="px-2.5 py-1.5 rounded-lg bg-red-500 text-white text-xs font-bold">🔒 Strict Mode</button>
-                      ${realStudents[0] ? `<button type="button" onclick="applyBulkSettingsToSelected('assign_to:${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold">🚀 Assign to ${realStudents[0].name}</button>` : ''}
+                      <button type="button" onclick="applyBulkSettingsToSelected('strict_on')" class="px-2.5 py-1.5 rounded-lg bg-red-500 text-white text-xs font-bold">🔒 Strict</button>
+                      <div class="flex items-center gap-1 bg-white/10 p-1 rounded-xl border border-white/15">
+                        <span class="text-[11px] font-bold px-2 text-slate-200">Assign To:</span>
+                        <select id="bulk-assign-select" onchange="setBulkAssignTarget(this.value)" class="px-2.5 py-1 rounded-lg bg-white text-ink text-xs font-bold outline-none">
+                          <option value="ALL" ${bulkAssignTargetId === 'ALL' ? 'selected' : ''}>Select All Students</option>
+                          ${realStudents.map(s => `<option value="${s.id}" ${bulkAssignTargetId === s.id ? 'selected' : ''}>${s.name} (${s.gradeLevel})</option>`).join("")}
+                          <option value="${SANDBOX_STUDENT_ID}" ${bulkAssignTargetId === SANDBOX_STUDENT_ID ? 'selected' : ''}>🧪 Teacher Sandbox</option>
+                        </select>
+                        <button type="button" onclick="applyBulkSettingsToSelected('assign_to:' + document.getElementById('bulk-assign-select').value)" class="px-3 py-1 rounded-lg bg-sage-500 hover:bg-sage-600 text-white text-xs font-extrabold">Apply</button>
+                      </div>
                       <button type="button" onclick="applyBulkSettingsToSelected('delete_selected')" class="px-2.5 py-1.5 rounded-lg bg-red-900/80 text-red-200 text-xs font-bold">✕ Delete</button>
                     </div>
                   </div>
@@ -2160,7 +2220,7 @@
 
                 <div class="space-y-3">${subjectRoadmap.map(item => {
                   const isL = item.kind === "lesson", obj = item.data, isDraft = obj.studentId === SANDBOX_STUDENT_ID, itemKey = `${item.kind}:${obj.id}`, isChecked = selectedBulkItemKeys.has(itemKey);
-                  return `<div class="p-4 rounded-2xl border ${isChecked ? 'ring-2 ring-tealhub-500' : ''} ${isDraft ? 'bg-amberwarm-50/40 border-amberwarm-400/50' : 'bg-white'} ${!isL && parentTypeFilter === 'ALL' ? 'sm:ml-6' : ''} flex flex-wrap justify-between items-center gap-2"><div class="flex items-start gap-3"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleBulkItemSelection('${itemKey}')" class="mt-1 w-4 h-4 accent-tealhub-500 cursor-pointer" /><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded ${isL ? 'bg-tealhub-500 text-white' : 'bg-slate-100'} mr-1.5">${isL ? '📖 Lesson' : obj.type}</span><span class="text-[11px] font-bold px-2 py-0.5 rounded ${isDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100'}">${isDraft ? '🧪 Sandbox Draft' : (getStudentById(obj.studentId)?.name || 'All')}</span>${!isL && isWorkUploadRequired(obj) ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 ml-1">📎 Upload Req</span>` : ''}${!isL && obj.lockUntilDate ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-tealhub-500/10 text-tealhub-600 ml-1">📅 Date-Locked</span>` : ''}<span class="text-xs text-slate-400 ml-1.5">${isL ? (obj.date||'') : `Due ${obj.dueDate||''}`}</span><p class="font-bold text-sm mt-1">${obj.title}</p></div></div><div class="flex flex-wrap gap-1.5">${isDraft && realStudents[0] ? `<button type="button" onclick="assignSandboxDraftToStudent('${item.kind}','${obj.id}','${realStudents[0].id}')" class="px-2.5 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold">🚀 Assign to ${realStudents[0].name}</button>` : ''}<button type="button" onclick="previewItemInStudentView('${item.kind}','${obj.id}','${obj.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 text-xs font-bold">👁 Preview</button><button type="button" onclick="${isL ? `startEditLesson('${obj.id}')` : `startEditAssignment('${obj.id}')`}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">✎ Edit</button><button type="button" onclick="deleteItem('${item.kind}','${obj.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-red-500 text-xs font-bold">✕</button></div></div>`;
+                  return `<div class="p-4 rounded-2xl border ${isChecked ? 'ring-2 ring-tealhub-500' : ''} ${isDraft ? 'bg-amberwarm-50/40 border-amberwarm-400/50' : 'bg-white'} ${!isL && parentTypeFilter === 'ALL' ? 'sm:ml-6' : ''} flex flex-wrap justify-between items-center gap-2"><div class="flex items-start gap-3"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleBulkItemSelection('${itemKey}')" class="mt-1 w-4 h-4 accent-tealhub-500 cursor-pointer" /><div><span class="text-[11px] font-bold uppercase px-2 py-0.5 rounded ${isL ? 'bg-tealhub-500 text-white' : 'bg-slate-100'} mr-1.5">${isL ? '📖 Lesson' : obj.type}</span><span class="text-[11px] font-bold px-2 py-0.5 rounded ${isDraft ? 'bg-amberwarm-100 text-amberwarm-600' : 'bg-slate-100'}">${formatAssignedLabel(obj)}</span>${!isL && isWorkUploadRequired(obj) ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amberwarm-100 text-amberwarm-600 ml-1">📎 Upload Req</span>` : ''}${!isL && obj.lockUntilDate ? `<span class="text-[10px] font-bold px-2 py-0.5 rounded bg-tealhub-500/10 text-tealhub-600 ml-1">📅 Date-Locked</span>` : ''}<span class="text-xs text-slate-400 ml-1.5">${isL ? (obj.date||'') : `Due ${obj.dueDate||''}`}</span><p class="font-bold text-sm mt-1">${obj.title}</p></div></div><div class="flex flex-wrap gap-1.5">${isDraft ? `<select onchange="if(this.value) assignSandboxDraftToStudent('${item.kind}','${obj.id}',this.value)" class="px-2 py-1.5 rounded-lg bg-sage-500 text-white text-xs font-bold cursor-pointer"><option value="">🚀 Assign To...</option><option value="ALL">All Students</option>${realStudents.map(s => `<option value="${s.id}">${s.name}</option>`).join("")}</select>` : ''}<button type="button" onclick="previewItemInStudentView('${item.kind}','${obj.id}','${obj.subject}')" class="px-2.5 py-1.5 rounded-lg bg-amberwarm-100 text-xs font-bold">👁 Preview</button><button type="button" onclick="${isL ? `startEditLesson('${obj.id}')` : `startEditAssignment('${obj.id}')`}" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-xs font-bold">✎ Edit</button><button type="button" onclick="deleteItem('${item.kind}','${obj.id}')" class="px-2.5 py-1.5 rounded-lg bg-slate-100 text-red-500 text-xs font-bold">✕</button></div></div>`;
                 }).join("") || '<p class="text-xs text-slate-400 text-center py-6">No items match this filter.</p>'}</div>
               </div>
             </div>` : ''}
@@ -2254,9 +2314,26 @@
           })() : ''}
 
           ${parentTab === "gradebook" ? `
-            <div class="space-y-6">
-              <div class="flex flex-wrap justify-between items-center gap-2"><div class="flex flex-wrap gap-2">${["All", ...allStudents.map(s=>s.id)].map(id => `<button type="button" onclick="setParentStudentFilter('${id}')" class="px-3 py-1 rounded-full text-xs font-bold ${parentStudentFilter===id?'bg-tealhub-500 text-white':'bg-slate-100'}">${id==="All"?"All Students":getStudentById(id)?.name}</button>`).join("")}</div><button type="button" onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-slate-100 text-xs font-bold">⬇ Export Grades (CSV)</button></div>
-              <div class="rounded-2xl border overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Student</th><th class="p-3">Subject</th><th class="p-3">Item</th><th class="p-3">Status</th><th class="p-3">Score</th><th class="p-3">Alert Reason</th><th class="p-3 text-right">Actions</th></tr></thead><tbody class="divide-y">${allStudents.filter(s=>parentStudentFilter==="All"||s.id===parentStudentFilter).flatMap(stu=>(appState.assignments||[]).filter(a=>isAssignmentVisibleToStudent(a,stu.id)).sort(compareAssignmentsChronological).map(a=>{const sk=getSubKey(stu.id,a.id), sub=subs[sk], tot=a.questions.reduce((acc,q)=>acc+Number(q.points||0),0), viol=sub?.violations||[]; return `<tr><td class="p-3 font-bold">${stu.name}</td><td class="p-3">${a.subject}</td><td class="p-3">${a.title}</td><td class="p-3 text-xs">${sub?sub.status:'Not Started'}</td><td class="p-3 font-bold">${!sub ? '—' : (!isGradedAssessment(a) ? `<span class="text-xs font-semibold text-slate-500">✓ Ungraded (${sub.earnedPoints}/${tot})</span>` : `${sub.earnedPoints}/${tot}`)}</td><td class="p-3 text-xs text-red-600">${viol.length?viol.join("; "):''}</td><td class="p-3 text-right space-x-1">${sub?`<button type="button" onclick="reopenAssignmentSubmission('${sk}')" class="px-2 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button type="button" onclick="openSubmissionReview('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold">Review</button>`:''}</td></tr>`;})).join("")}</tbody></table></div>
+            <div class="space-y-5">
+              <div class="bg-slate-50 p-4 rounded-2xl border space-y-3">
+                <div class="flex flex-wrap justify-between items-center gap-2 pb-2.5 border-b border-slate-200/70">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span class="text-[11px] font-bold uppercase text-slate-400 mr-1">Filter Student:</span>
+                    ${["All", ...allStudents.map(s=>s.id)].map(id => `<button type="button" onclick="setParentStudentFilter('${id}')" class="px-3 py-1 rounded-full text-xs font-bold ${parentStudentFilter===id?'bg-ink text-white':'bg-white border text-slate-600'}">${id==="All"?"All Students":getStudentById(id)?.name}</button>`).join("")}
+                  </div>
+                  <button type="button" onclick="exportGradesCSV()" class="px-3.5 py-1.5 rounded-xl bg-white border text-xs font-bold">⬇ Export Grades (CSV)</button>
+                </div>
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="text-[11px] font-bold uppercase text-slate-400 mr-1">Filter Assignment Type:</span>
+                  ${["ALL", "Daily Review", "Homework", "Quiz", "Test", "Project", "Extra Credit"].map(ft => `
+                    <button type="button" onclick="setGradebookTypeFilter('${ft}')"
+                      class="px-3 py-1 rounded-full text-xs font-bold transition ${gradebookTypeFilter === ft ? 'bg-tealhub-500 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'}">
+                      ${ft === "ALL" ? "All Assignments" : ft}
+                    </button>
+                  `).join("")}
+                </div>
+              </div>
+              <div class="rounded-2xl border overflow-x-auto"><table class="w-full text-left text-sm"><thead class="bg-slate-50 border-b text-xs uppercase text-slate-500"><tr><th class="p-3">Student</th><th class="p-3">Subject</th><th class="p-3">Type</th><th class="p-3">Assignment</th><th class="p-3">Status</th><th class="p-3">Score</th><th class="p-3">Alert Reason</th><th class="p-3 text-right">Actions</th></tr></thead><tbody class="divide-y">${allStudents.filter(s=>parentStudentFilter==="All"||s.id===parentStudentFilter).flatMap(stu=>(appState.assignments||[]).filter(a=>isAssignmentVisibleToStudent(a,stu.id) && (gradebookTypeFilter==="ALL" || (a.type||"").toLowerCase()===gradebookTypeFilter.toLowerCase())).sort(compareAssignmentsChronological).map(a=>{const sk=getSubKey(stu.id,a.id), sub=subs[sk], tot=a.questions.reduce((acc,q)=>acc+Number(q.points||0),0), viol=sub?.violations||[]; return `<tr><td class="p-3 font-bold">${stu.name}</td><td class="p-3">${a.subject}</td><td class="p-3"><span class="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100">${a.type}</span></td><td class="p-3">${a.title}</td><td class="p-3 text-xs">${sub?sub.status:'Not Started'}</td><td class="p-3 font-bold">${!sub ? '—' : (!isGradedAssessment(a) ? `<span class="text-xs font-semibold text-slate-500">✓ Ungraded (${sub.earnedPoints}/${tot})</span>` : `${sub.earnedPoints}/${tot}`)}</td><td class="p-3 text-xs text-red-600">${viol.length?viol.join("; "):''}</td><td class="p-3 text-right space-x-1">${sub?`<button type="button" onclick="reopenAssignmentSubmission('${sk}')" class="px-2 py-1 rounded border text-xs font-bold text-amberwarm-600">↺ Reopen</button><button type="button" onclick="openSubmissionReview('${sk}')" class="px-2.5 py-1 rounded border text-xs font-bold">Review</button>`:''}</td></tr>`;})).join("")}</tbody></table></div>
             </div>` : ''}
 
           ${parentTab === "students" ? `
