@@ -87,7 +87,7 @@
   <header class="relative z-20 pt-4 pb-2 no-print">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <img src="./sunshine-emblem.png" alt="Sunshine Homeschool" class="w-24 h-24 object-contain shrink-0 drop-shadow-sm" />
+        <img src="./sunshine-emblem.png" alt="Sunshine Homeschool" class="w-12 h-12 object-contain shrink-0 drop-shadow-sm" />
         <div>
           <h1 id="header-main-title" class="font-display font-extrabold text-xl sm:text-2xl text-ink tracking-tight">Sunshine Homeschool Hub</h1>
           <p class="text-xs font-medium text-slate-600" id="header-user-email">Google Workspace Connected</p>
@@ -183,6 +183,14 @@
     let isFilePickerOpen = false;
     let builderQuestions = [{ id: "bq_1", type: "mcq", prompt: "", points: 10, options: ["", "", "", ""], correctAnswer: "0" }];
     let pendingUploadedWorkFile = null;
+    let studentGraphDrafts = {}; // Stores plotted coordinate points per question ID: { [qId]: [{x, y}, ...] }
+    let activeGameId = "coord-treasure";
+    let gameSession = {
+      treasure: { target: { x: 3, y: -2 }, score: 0, streak: 0, msg: "Tap the coordinate grid to uncover the hidden gem!", found: false },
+      slope: { m: 2, b: -1, score: 0, streak: 0, msg: "Plot 2 points on the line to launch the laser!", points: [] },
+      vocab: { idx: 0, score: 0, streak: 0, answered: false, msg: "" },
+      science: { idx: 0, score: 0, streak: 0, answered: false, msg: "" }
+    };
 
     function getLocalTodayISO() {
       const d = new Date();
@@ -548,6 +556,264 @@
       return match ? `https://www.youtube.com/embed/${match[1]}` : null;
     }
 
+    
+    // =========================================================================
+    // INTERACTIVE COORDINATE GRAPHING ENGINE (LINES, POINTS & POLYGONS)
+    // =========================================================================
+    function parseGraphPoints(raw) {
+      if (!raw) return [];
+      if (Array.isArray(raw)) return raw.map(p => ({ x: Number(p.x), y: Number(p.y) })).filter(p => !isNaN(p.x) && !isNaN(p.y));
+      const matches = [...String(raw).matchAll(/\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/g)];
+      return matches.map(m => ({ x: Number(m[1]), y: Number(m[2]) }));
+    }
+
+    function formatGraphPoints(pts) {
+      return (pts || []).map(p => `(${p.x}, ${p.y})`).join(", ");
+    }
+
+    function evaluateGraphAnswer(q, studentRaw) {
+      const pts = parseGraphPoints(studentRaw);
+      const mode = (q.graphMode || "line").toLowerCase();
+      if (mode === "line") {
+        if (pts.length < 2) return false;
+        const spec = String(q.correctAnswer || "").replace(/\s+/g, "");
+        const mbMatch = spec.match(/m=(-?\d+(?:\.\d+)?),b=(-?\d+(?:\.\d+)?)/i);
+        if (mbMatch) {
+          const m = Number(mbMatch[1]), b = Number(mbMatch[2]);
+          const unique = new Set(pts.map(p => `${p.x},${p.y}`));
+          if (unique.size < 2) return false;
+          return pts.every(p => Math.abs(p.y - (m * p.x + b)) < 0.01);
+        }
+        const vertMatch = spec.match(/^x=(-?\d+(?:\.\d+)?)$/i);
+        if (vertMatch) {
+          const vx = Number(vertMatch[1]);
+          const unique = new Set(pts.map(p => `${p.x},${p.y}`));
+          return unique.size >= 2 && pts.every(p => Math.abs(p.x - vx) < 0.01);
+        }
+      }
+      const expected = parseGraphPoints(q.correctAnswer);
+      if (!expected.length || pts.length !== expected.length) return false;
+      const expSet = new Set(expected.map(p => `${p.x},${p.y}`));
+      const stuSet = new Set(pts.map(p => `${p.x},${p.y}`));
+      if (expSet.size !== stuSet.size) return false;
+      for (const k of expSet) if (!stuSet.has(k)) return false;
+      return true;
+    }
+
+    window.toggleGraphPoint = (qId, gx, gy, maxPts = 12) => {
+      if (!studentGraphDrafts[qId]) studentGraphDrafts[qId] = [];
+      const arr = studentGraphDrafts[qId];
+      const idx = arr.findIndex(p => p.x === gx && p.y === gy);
+      if (idx !== -1) arr.splice(idx, 1);
+      else {
+        if (arr.length >= maxPts) arr.shift();
+        arr.push({ x: gx, y: gy });
+      }
+      render();
+    };
+
+    window.clearGraphPoints = (qId) => {
+      studentGraphDrafts[qId] = [];
+      render();
+    };
+
+    function renderInteractiveCoordinateGrid(qId, points, graphMode = "line", locked = false, expectedPoints = null) {
+      const size = 320, pad = 26, minV = -6, maxV = 6, span = maxV - minV;
+      const step = (size - pad * 2) / span;
+      const toPx = (x, y) => ({ px: pad + (x - minV) * step, py: pad + (maxV - y) * step });
+
+      let gridLines = "";
+      for (let v = minV; v <= maxV; v++) {
+        const { px } = toPx(v, 0);
+        const { py } = toPx(0, v);
+        const isAxis = v === 0;
+        gridLines += `<line x1="${px}" y1="${pad}" x2="${px}" y2="${size - pad}" stroke="${isAxis ? '#263238' : '#CBD5E1'}" stroke-width="${isAxis ? 2 : 1}" />`;
+        gridLines += `<line x1="${pad}" y1="${py}" x2="${size - pad}" y2="${py}" stroke="${isAxis ? '#263238' : '#CBD5E1'}" stroke-width="${isAxis ? 2 : 1}" />`;
+        if (v !== 0 && v % 2 === 0) {
+          gridLines += `<text x="${px}" y="${toPx(0,0).py + 13}" font-size="9" text-anchor="middle" fill="#475569" font-weight="bold">${v}</text>`;
+          gridLines += `<text x="${toPx(0,0).px - 8}" y="${py + 3}" font-size="9" text-anchor="end" fill="#475569" font-weight="bold">${v}</text>`;
+        }
+      }
+
+      let shapeSvg = "";
+      if (graphMode === "line" && points.length >= 2) {
+        const p1 = points[0], p2 = points[1];
+        if (p1.x === p2.x) {
+          const topPt = toPx(p1.x, maxV), botPt = toPx(p1.x, minV);
+          shapeSvg += `<line x1="${topPt.px}" y1="${topPt.py}" x2="${botPt.px}" y2="${botPt.py}" stroke="#338A94" stroke-width="3" />`;
+        } else {
+          const m = (p2.y - p1.y) / (p2.x - p1.x);
+          const b = p1.y - m * p1.x;
+          const leftPt = toPx(minV, m * minV + b), rightPt = toPx(maxV, m * maxV + b);
+          shapeSvg += `<line x1="${leftPt.px}" y1="${leftPt.py}" x2="${rightPt.px}" y2="${rightPt.py}" stroke="#338A94" stroke-width="3" />`;
+        }
+      } else if (graphMode === "polygon" && points.length >= 2) {
+        const coords = points.map(p => { const c = toPx(p.x, p.y); return `${c.px},${c.py}`; }).join(" ");
+        if (points.length >= 3) {
+          shapeSvg += `<polygon points="${coords}" fill="rgba(93, 138, 94, 0.28)" stroke="#5D8A5E" stroke-width="2.5" />`;
+        } else {
+          shapeSvg += `<polyline points="${coords}" fill="none" stroke="#5D8A5E" stroke-width="2.5" />`;
+        }
+      }
+
+      if (locked && expectedPoints && expectedPoints.length) {
+        if (graphMode === "line" && expectedPoints.length >= 2) {
+          const ep1 = expectedPoints[0], ep2 = expectedPoints[1];
+          if (ep1.x === ep2.x) {
+            const tP = toPx(ep1.x, maxV), bP = toPx(ep1.x, minV);
+            shapeSvg += `<line x1="${tP.px}" y1="${tP.py}" x2="${bP.px}" y2="${bP.py}" stroke="#10B981" stroke-width="2" stroke-dasharray="5,4" />`;
+          } else {
+            const em = (ep2.y - ep1.y) / (ep2.x - ep1.x), eb = ep1.y - em * ep1.x;
+            const lP = toPx(minV, em * minV + eb), rP = toPx(maxV, em * maxV + eb);
+            shapeSvg += `<line x1="${lP.px}" y1="${lP.py}" x2="${rP.px}" y2="${rP.py}" stroke="#10B981" stroke-width="2" stroke-dasharray="5,4" />`;
+          }
+        } else if (graphMode === "polygon" && expectedPoints.length >= 3) {
+          const eCoords = expectedPoints.map(p => { const c = toPx(p.x, p.y); return `${c.px},${c.py}`; }).join(" ");
+          shapeSvg += `<polygon points="${eCoords}" fill="none" stroke="#10B981" stroke-width="2" stroke-dasharray="5,4" />`;
+        }
+      }
+
+      let hitTargets = "";
+      if (!locked) {
+        const maxPts = graphMode === "line" ? 2 : 10;
+        for (let gx = minV; gx <= maxV; gx++) {
+          for (let gy = minV; gy <= maxV; gy++) {
+            const { px, py } = toPx(gx, gy);
+            hitTargets += `<circle cx="${px}" cy="${py}" r="8" fill="transparent" class="cursor-pointer" onclick="toggleGraphPoint('${qId}', ${gx}, ${gy}, ${maxPts})" />`;
+          }
+        }
+      }
+
+      let dots = points.map((p) => {
+        const { px, py } = toPx(p.x, p.y);
+        return `<circle cx="${px}" cy="${py}" r="6" fill="#E67635" stroke="#FFFFFF" stroke-width="2" pointer-events="none" />
+                <text x="${px + 8}" y="${py - 6}" font-size="10" font-weight="bold" fill="#263238" pointer-events="none">(${p.x},${p.y})</text>`;
+      }).join("");
+
+      return `
+        <div class="flex flex-col sm:flex-row items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+          <svg viewBox="0 0 ${size} ${size}" class="w-72 h-72 sm:w-80 sm:h-80 bg-white rounded-xl border border-slate-300 shadow-inner shrink-0 select-none">
+            ${gridLines}
+            <text x="${size - 12}" y="${toPx(0,0).py - 5}" font-size="10" font-weight="bold" fill="#263238">x</text>
+            <text x="${toPx(0,0).px + 6}" y="15" font-size="10" font-weight="bold" fill="#263238">y</text>
+            ${shapeSvg}
+            ${dots}
+            ${hitTargets}
+          </svg>
+          <div class="space-y-2.5 text-xs flex-1">
+            <span class="inline-block px-2.5 py-1 rounded-lg bg-tealhub-500/10 text-tealhub-600 font-extrabold uppercase">
+              ${graphMode === 'line' ? '📈 Linear Equation Grapher (Plot 2 Points)' : (graphMode === 'polygon' ? '🔷 Coordinate Shape Builder (Plot All Vertices)' : '📍 Coordinate Point Plotter')}
+            </span>
+            <p class="text-slate-600 leading-relaxed">
+              ${graphMode === 'line' ? 'Tap any <strong>2 integer grid intersections</strong> that satisfy the equation to draw your line. Tap a point again to remove it.' : 'Tap each <strong>coordinate intersection</strong> on the grid to plot your points/shape vertices. Tap a point again to remove it.'}
+            </p>
+            <div class="p-2.5 rounded-xl bg-white border border-slate-200 font-mono text-xs">
+              <strong>Plotted Points:</strong> ${points.length ? formatGraphPoints(points) : '<span class="text-slate-400">None yet</span>'}
+            </div>
+            ${!locked ? `<button type="button" onclick="clearGraphPoints('${qId}')" class="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold">↺ Clear Grid</button>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    // =========================================================================
+    // STUDENT EDUCATIONAL GAMES ARCADE (MATH, VOCAB/ELA & SCIENCE)
+    // =========================================================================
+    const GAME_VOCAB_DECK = [
+      { prompt: "What literary device occurs when the audience knows a secret that the characters on stage do not?", choices: ["Dramatic Irony", "Simile", "Alliteration", "Onomatopoeia"], ans: 0 },
+      { prompt: "In ancient India, what term describes the duty or moral path each person must follow?", choices: ["Karma", "Dharma", "Nirvana", "Caste"], ans: 1 },
+      { prompt: "What is the emotional association a word carries beyond its literal dictionary definition?", choices: ["Denotation", "Connotation", "Syntax", "Citation"], ans: 1 },
+      { prompt: "Which Phoenician city-state gave its name to the Greek word for book ('biblia')?", choices: ["Tyre", "Carthage", "Byblos", "Sidon"], ans: 2 },
+      { prompt: "What Zhou Chinese principle stated heaven granted a just ruler the right to govern?", choices: ["Legalism", "Filial Piety", "Mandate of Heaven", "Daoism"], ans: 2 },
+      { prompt: "In argumentative writing, what does CER stand for?", choices: ["Claim, Evidence, Reasoning", "Context, Essay, Review", "Character, Event, Resolution", "Cite, Explain, Repeat"], ans: 0 }
+    ];
+
+    const GAME_SCIENCE_DECK = [
+      { prompt: "Lemon juice has a pH of 2.0. Is it an Acid, Base, or Neutral?", choices: ["Acid", "Base", "Neutral"], ans: 0 },
+      { prompt: "Pure distilled water has a pH of 7.0. Is it an Acid, Base, or Neutral?", choices: ["Acid", "Base", "Neutral"], ans: 2 },
+      { prompt: "Baking soda solution has a pH of 9.0 and turns red litmus paper blue. Is it an Acid, Base, or Neutral?", choices: ["Acid", "Base", "Neutral"], ans: 1 },
+      { prompt: "20 g of baking soda reacts with 30 g of vinegar in a sealed bag. What is the final mass?", choices: ["10 g", "50 g", "600 g"], ans: 1 },
+      { prompt: "An object has a density of 0.65 g/cm³. In water (1.0 g/mL), will it Sink or Float?", choices: ["Float", "Sink", "Dissolve"], ans: 0 },
+      { prompt: "Rusting iron and burning wood produce new substances. Are they Physical or Chemical changes?", choices: ["Chemical Change", "Physical Change"], ans: 0 }
+    ];
+
+    window.selectEducationalGame = (gid) => { activeGameId = gid; render(); };
+
+    window.guessTreasurePoint = (gx, gy) => {
+      const g = gameSession.treasure;
+      if (g.found) return;
+      const dist = Math.abs(gx - g.target.x) + Math.abs(gy - g.target.y);
+      if (dist === 0) {
+        g.found = true; g.score += 20; g.streak += 1;
+        g.msg = `🎉 Bullseye! You found the treasure at (${gx}, ${gy})! +20 pts`;
+      } else if (dist <= 2) {
+        g.msg = `🔥 Burning hot! (${gx}, ${gy}) is only ${dist} unit(s) away!`;
+      } else if (dist <= 4) {
+        g.msg = `☀️ Warm! (${gx}, ${gy}) is ${dist} units away.`;
+      } else {
+        g.msg = `❄️ Cold! (${gx}, ${gy}) is ${dist} units away. Check your signs (+/-)!`;
+      }
+      render();
+    };
+
+    window.nextTreasureRound = () => {
+      const rx = Math.floor(Math.random() * 11) - 5;
+      const ry = Math.floor(Math.random() * 11) - 5;
+      gameSession.treasure.target = { x: rx, y: ry };
+      gameSession.treasure.found = false;
+      gameSession.treasure.msg = `New Treasure hidden! Find (${rx}, ${ry}) on the grid!`;
+      render();
+    };
+
+    window.plotSlopeGamePoint = (gx, gy) => {
+      const g = gameSession.slope;
+      const idx = g.points.findIndex(p => p.x === gx && p.y === gy);
+      if (idx !== -1) { g.points.splice(idx, 1); render(); return; }
+      if (g.points.length >= 2) g.points.shift();
+      g.points.push({ x: gx, y: gy });
+      if (g.points.length === 2) {
+        const ok = g.points.every(p => p.y === g.m * p.x + g.b);
+        if (ok) {
+          g.score += 25; g.streak += 1;
+          g.msg = `🚀 Direct Hit! Both points lie on y = ${g.m}x ${g.b >= 0 ? '+ ' + g.b : '- ' + Math.abs(g.b)}! +25 pts`;
+        } else {
+          g.streak = 0;
+          g.msg = `❌ Missed! Check y = ${g.m}x ${g.b >= 0 ? '+ ' + g.b : '- ' + Math.abs(g.b)} (start at y-intercept b = ${g.b}, then use slope m = ${g.m}).`;
+        }
+      }
+      render();
+    };
+
+    window.nextSlopeRound = () => {
+      const slopes = [-2, -1, 1, 2, 3];
+      const intercepts = [-3, -2, -1, 0, 1, 2, 3];
+      gameSession.slope.m = slopes[Math.floor(Math.random() * slopes.length)];
+      gameSession.slope.b = intercepts[Math.floor(Math.random() * intercepts.length)];
+      gameSession.slope.points = [];
+      gameSession.slope.msg = "Plot 2 points on the new equation!";
+      render();
+    };
+
+    window.answerFlashcardGame = (deckKey, choiceIdx) => {
+      const g = gameSession[deckKey];
+      const deck = deckKey === "vocab" ? GAME_VOCAB_DECK : GAME_SCIENCE_DECK;
+      const item = deck[g.idx % deck.length];
+      if (choiceIdx === item.ans) {
+        g.score += 15; g.streak += 1; g.answered = true;
+        g.msg = "✓ Correct! +15 pts";
+      } else {
+        g.streak = 0;
+        g.msg = `Not quite — the correct answer is "${item.choices[item.ans]}".`;
+      }
+      render();
+    };
+
+    window.nextFlashcardRound = (deckKey) => {
+      const g = gameSession[deckKey];
+      g.idx += 1; g.answered = false; g.msg = "";
+      render();
+    };
+
     // Strict Mode Listeners
     function handleVisibilityOrBlur(reason) {
       if (isFilePickerOpen) return;
@@ -718,6 +984,12 @@
         return;
       }
       activeAssignmentId = id; activeLessonId = null; printableRecord = null; pendingUploadedWorkFile = null;
+      const existingSub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)];
+      asg.questions.forEach(q => {
+        if (q.type === "graph") {
+          studentGraphDrafts[q.id] = parseGraphPoints(existingSub?.answers?.[q.id] || "");
+        }
+      });
       if (asg?.strictMode) {
         const sub = (appState.submissions || {})[getSubKey(authenticatedStudentId, id)];
         if (!sub || sub.status === "in_progress") strictSession = { active: true, assignmentId: id, studentId: authenticatedStudentId, unlockedStarted: false, pausedLocked: false, violations: sub?.violations || [] };
@@ -775,6 +1047,7 @@
       const ans = {};
       asg.questions.forEach(q => {
         if (q.type === "mcq" || q.type === "tf") { const c = document.querySelector(`input[name="ans_${q.id}"]:checked`); ans[q.id] = c ? c.value : ""; }
+        else if (q.type === "graph") { ans[q.id] = formatGraphPoints(studentGraphDrafts[q.id] || []); }
         else { const el = document.getElementById(`ans_${q.id}`); ans[q.id] = el ? el.value : ""; }
       });
       return ans;
@@ -814,6 +1087,7 @@
       asg.questions.forEach(q => {
         const pts = Number(q.points) || 0; total += pts; const val = (answers[q.id] || "").trim();
         if (q.type === "mcq" || q.type === "tf") { qScores[q.id] = val === String(q.correctAnswer) ? pts : 0; earned += qScores[q.id]; }
+        else if (q.type === "graph") { qScores[q.id] = evaluateGraphAnswer(q, val) ? pts : 0; earned += qScores[q.id]; }
         else { manual = true; qScores[q.id] = (q.type === "fill" && q.correctAnswer && val.toLowerCase() === q.correctAnswer.trim().toLowerCase()) ? pts : 0; earned += qScores[q.id]; }
       });
       if (!appState.submissions) appState.submissions = {};
@@ -832,13 +1106,14 @@
     window.addPortfolioShowcaseItem = (e) => { e.preventDefault(); appState.portfolioShowcase.unshift({ id: "port_" + Date.now(), studentId: authenticatedStudentId, subject: document.getElementById("port_subject").value, title: document.getElementById("port_title").value.trim(), date: new Date().toISOString().slice(0, 10), description: document.getElementById("port_desc").value.trim(), linkUrl: document.getElementById("port_link").value.trim() }); saveState("Pinned to Showcase!"); };
 
     // Parent Builders, Editors & Read-Only Parent Observer Accounts
-    window.addBuilderQuestion = (type) => { builderQuestions.push({ id: "bq_" + Date.now(), type, prompt: "", points: 10, options: type === "mcq" ? ["", "", "", ""] : [], correctAnswer: type === "tf" ? "True" : (type === "mcq" ? "0" : "") }); render(); };
+    window.addBuilderQuestion = (type) => { builderQuestions.push({ id: "bq_" + Date.now(), type, graphMode: "line", prompt: "", points: 10, options: type === "mcq" ? ["", "", "", ""] : [], correctAnswer: type === "tf" ? "True" : (type === "mcq" ? "0" : (type === "graph" ? "m=2,b=1" : "")) }); render(); };
     window.removeBuilderQuestion = (idx) => { builderQuestions.splice(idx, 1); render(); };
     window.syncBuilderInputsToMemory = () => {
       builderQuestions.forEach((q, idx) => {
         const p = document.getElementById(`bq_prompt_${idx}`), pts = document.getElementById(`bq_pts_${idx}`);
         if (p) q.prompt = p.value; if (pts) q.points = Number(pts.value) || 10;
         if (q.type === "mcq") { q.options = [0,1,2,3].map(o => document.getElementById(`bq_opt_${idx}_${o}`)?.value || ""); q.correctAnswer = document.getElementById(`bq_corr_${idx}`)?.value || "0"; }
+        else if (q.type === "graph") { q.graphMode = document.getElementById(`bq_gmode_${idx}`)?.value || "line"; q.correctAnswer = document.getElementById(`bq_corr_${idx}`)?.value || ""; }
         else if (q.type === "tf" || q.type === "fill") q.correctAnswer = document.getElementById(`bq_corr_${idx}`)?.value || "";
       });
     };
@@ -1056,7 +1331,7 @@
       const out = ["RecordType,Subject,Title,DateOrDay,SubTypeOrTime,ContentOrPrompt,QuestionType,Options,CorrectAnswer,PointsOrStrict,ItemID,AssignedTo"];
       (appState.schedule || []).forEach(b => out.push(["Schedule", b.subject, b.title, b.day, `${b.startTime}-${b.endTime}`, b.category, "", "", "", "", b.id, b.studentId || "ALL"].map(csvEscape).join(",")));
       [...(appState.lessons || [])].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(l => out.push(["Lesson", l.subject, l.title, l.date || "", "", (l.content || "").replace(/\r?\n/g, "\\n"), l.checkQuestion?.enabled ? "mcq" : "", (l.checkQuestion?.options || []).filter(Boolean).join(" | "), l.checkQuestion?.enabled ? String(l.checkQuestion.correctIndex ?? 0) : "", l.checkQuestion?.enabled ? (l.checkQuestion.prompt || "") : "", l.id, l.studentId || "stu_1"].map(csvEscape).join(",")));
-      [...(appState.assignments || [])].sort(compareAssignmentsChronological).forEach(a => (a.questions || []).forEach(q => out.push(["Assignment", a.subject, a.title, a.dueDate || "", a.type || "Homework", q.prompt || "", q.type || "mcq", q.type === "mcq" ? (q.options || []).join(" | ") : "", q.correctAnswer || "", `${q.points || 10}${a.strictMode ? " STRICT" : ""}${isWorkUploadRequired(a) ? " REQUIRE_UPLOAD" : ""}${a.lockUntilDate ? " DATE_LOCK" : ""}`, a.id, a.studentId || "stu_1"].map(csvEscape).join(","))));
+      [...(appState.assignments || [])].sort(compareAssignmentsChronological).forEach(a => (a.questions || []).forEach(q => out.push(["Assignment", a.subject, a.title, a.dueDate || "", a.type || "Homework", q.prompt || "", q.type || "mcq", q.type === "mcq" ? (q.options || []).join(" | ") : (q.type === "graph" ? (q.graphMode || "line") : ""), q.correctAnswer || "", `${q.points || 10}${a.strictMode ? " STRICT" : ""}${isWorkUploadRequired(a) ? " REQUIRE_UPLOAD" : ""}${a.lockUntilDate ? " DATE_LOCK" : ""}`, a.id, a.studentId || "stu_1"].map(csvEscape).join(","))));
       const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([out.join("\n")], { type: "text/csv;charset=utf-8;" })); a.download = `Sunshine_Homeschool_Live_Curriculum_${new Date().toISOString().slice(0,10)}.csv`; a.click();
       showSavedToast("Exported live curriculum CSV!");
     };
@@ -1114,7 +1389,7 @@
             }
             if (content) {
               const qt = (qTypeRaw || "mcq").toLowerCase();
-              asgMap[key].questions.push({ id: "q_" + Date.now() + "_" + i, type: qt, prompt: content, points: ptsNum, options: qt === "mcq" && optsRaw ? optsRaw.split("|").map(s => s.trim()) : [], correctAnswer: corrRaw || "" });
+              asgMap[key].questions.push({ id: "q_" + Date.now() + "_" + i, type: qt, graphMode: qt === "graph" ? (optsRaw || "line").trim().toLowerCase() : undefined, prompt: content, points: ptsNum, options: qt === "mcq" && optsRaw ? optsRaw.split("|").map(s => s.trim()) : [], correctAnswer: corrRaw || "" });
             }
           }
         }
@@ -1315,12 +1590,12 @@
     }
 
     function renderGoogleSignInGate() {
-      return `<div class="max-w-md mx-auto my-10 bg-white rounded-3xl p-8 border border-white shadow-md text-center"><img src="./sunshine-emblem.png" alt="Sunshine Homeschool" class="w-48 h-48 object-contain mx-auto mb-3 drop-shadow-sm" /><h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool Hub</h2><p class="text-sm text-slate-500 mt-2 mb-6">Sign in with your authorized family Gmail account.</p>${authErrorText ? `<div class="mb-5 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">${authErrorText}</div>` : ''}<button type="button" onclick="signInWithGoogle()" class="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-50 text-ink font-display font-extrabold text-sm border-2 border-slate-200 shadow-sm">Sign in with Google</button></div>`;
+      return `<div class="max-w-md mx-auto my-10 bg-white rounded-3xl p-8 border border-white shadow-md text-center"><img src="./sunshine-emblem.png" alt="Sunshine Homeschool" class="w-24 h-24 object-contain mx-auto mb-3 drop-shadow-sm" /><h2 class="text-2xl font-display font-extrabold text-ink">Sunshine Homeschool Hub</h2><p class="text-sm text-slate-500 mt-2 mb-6">Sign in with your authorized family Gmail account.</p>${authErrorText ? `<div class="mb-5 p-3 rounded-xl bg-red-50 text-xs text-red-700 font-bold">${authErrorText}</div>` : ''}<button type="button" onclick="signInWithGoogle()" class="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-50 text-ink font-display font-extrabold text-sm border-2 border-slate-200 shadow-sm">Sign in with Google</button></div>`;
     }
 
     function renderStudentPortalShell() {
       const student = getStudentById(authenticatedStudentId), metrics = computeStudentMetrics(student), pending = metrics.todoAssignments.length + metrics.inProgressAssignments.length;
-      const nav = [{ id: "home", label: "Home" }, { id: "schedule", label: "Schedule" }, { id: "subjects", label: "Subjects" }, { id: "assignments", label: "Assignments", badge: pending }, { id: "resources", label: "Resources" }, { id: "portfolio", label: "Progress & Grades" }, { id: "reading", label: "Reading Log" }, { id: "activities", label: "Activities & Hours" }];
+      const nav = [{ id: "home", label: "Home" }, { id: "schedule", label: "Schedule" }, { id: "subjects", label: "Subjects" }, { id: "assignments", label: "Assignments", badge: pending }, { id: "games", label: "🎮 Learning Games" }, { id: "resources", label: "Resources" }, { id: "portfolio", label: "Progress & Grades" }, { id: "reading", label: "Reading Log" }, { id: "activities", label: "Activities & Hours" }];
       return `
         ${parentUnlockedSession ? `<div class="mb-4 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2 shadow-sm"><span>🧪 <strong>Teacher Sandbox Preview:</strong> Testing drafts safely—your student's real account stays untouched.</span><div class="flex gap-2"><button type="button" onclick="resetSandboxProgress()" class="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 font-bold">↺ Reset Test Progress</button><button type="button" onclick="openParentPinModal()" class="px-3 py-1 rounded-xl bg-tealhub-500 font-bold">Return to Parent Hub →</button></div></div>` : ''}
         <div class="flex flex-wrap items-center justify-between gap-3 mb-6 pb-2 border-b border-slate-400/25">
@@ -1332,6 +1607,7 @@
         ${studentTab === "schedule" ? renderTabSchedule(student) : ''}
         ${studentTab === "subjects" ? renderTabSubjects(student, metrics) : ''}
         ${studentTab === "assignments" ? renderTabAssignments(student, metrics) : ''}
+        ${studentTab === "games" ? renderTabGames(student) : ''}
         ${studentTab === "resources" ? renderTabResources() : ''}
         ${studentTab === "portfolio" ? renderTabPortfolio(student, metrics) : ''}
         ${studentTab === "reading" ? renderTabReadingLog(student) : ''}
@@ -1478,6 +1754,136 @@
       }).join("") || '<div class="bg-white rounded-3xl p-10 text-center text-sm text-slate-500">No assignments here.</div>'}</div></div>`;
     }
 
+    
+    function renderTabGames(student) {
+      const size = 300, pad = 24, minV = -5, maxV = 5, span = maxV - minV, step = (size - pad * 2) / span;
+      const toPx = (x, y) => ({ px: pad + (x - minV) * step, py: pad + (maxV - y) * step });
+
+      const buildMiniGrid = (onClickFn, plottedPts = [], drawLine = false, treasureFoundPt = null) => {
+        let lines = "";
+        for (let v = minV; v <= maxV; v++) {
+          const { px } = toPx(v, 0), { py } = toPx(0, v);
+          lines += `<line x1="${px}" y1="${pad}" x2="${px}" y2="${size - pad}" stroke="${v===0?'#263238':'#CBD5E1'}" stroke-width="${v===0?2:1}"/>`;
+          lines += `<line x1="${pad}" y1="${py}" x2="${size - pad}" y2="${py}" stroke="${v===0?'#263238':'#CBD5E1'}" stroke-width="${v===0?2:1}"/>`;
+          if (v !== 0) {
+            lines += `<text x="${px}" y="${toPx(0,0).py + 12}" font-size="9" text-anchor="middle" fill="#475569">${v}</text>`;
+            lines += `<text x="${toPx(0,0).px - 7}" y="${py + 3}" font-size="9" text-anchor="end" fill="#475569">${v}</text>`;
+          }
+        }
+        let extra = "";
+        if (drawLine && plottedPts.length === 2) {
+          const p1 = plottedPts[0], p2 = plottedPts[1];
+          if (p1.x === p2.x) {
+            const t = toPx(p1.x, maxV), b = toPx(p1.x, minV);
+            extra += `<line x1="${t.px}" y1="${t.py}" x2="${b.px}" y2="${b.py}" stroke="#338A94" stroke-width="3"/>`;
+          } else {
+            const m = (p2.y - p1.y) / (p2.x - p1.x), b = p1.y - m * p1.x;
+            const l = toPx(minV, m * minV + b), r = toPx(maxV, m * maxV + b);
+            extra += `<line x1="${l.px}" y1="${l.py}" x2="${r.px}" y2="${r.py}" stroke="#338A94" stroke-width="3"/>`;
+          }
+        }
+        let hits = "";
+        for (let gx = minV; gx <= maxV; gx++) {
+          for (let gy = minV; gy <= maxV; gy++) {
+            const { px, py } = toPx(gx, gy);
+            hits += `<circle cx="${px}" cy="${py}" r="9" fill="transparent" class="cursor-pointer" onclick="${onClickFn}(${gx}, ${gy})"/>`;
+          }
+        }
+        const markers = plottedPts.map(p => {
+          const { px, py } = toPx(p.x, p.y);
+          return `<circle cx="${px}" cy="${py}" r="6" fill="#E67635" stroke="#fff" stroke-width="2" pointer-events="none"/>`;
+        }).join("");
+        const gem = treasureFoundPt ? (() => { const { px, py } = toPx(treasureFoundPt.x, treasureFoundPt.y); return `<text x="${px}" y="${py + 6}" font-size="18" text-anchor="middle">💎</text>`; })() : "";
+        return `<svg viewBox="0 0 ${size} ${size}" class="w-72 h-72 bg-white rounded-2xl border border-slate-300 shadow-inner select-none">${lines}${extra}${markers}${gem}${hits}</svg>`;
+      };
+
+      const tr = gameSession.treasure, sl = gameSession.slope, vo = gameSession.vocab, sc = gameSession.science;
+      const totalGamePts = tr.score + sl.score + vo.score + sc.score;
+      const vItem = GAME_VOCAB_DECK[vo.idx % GAME_VOCAB_DECK.length];
+      const sItem = GAME_SCIENCE_DECK[sc.idx % GAME_SCIENCE_DECK.length];
+
+      return `
+        <div class="space-y-6">
+          <div class="bg-white rounded-3xl p-6 shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <span class="text-xs font-extrabold uppercase text-tealhub-600">Interactive Skill Builders</span>
+              <h2 class="text-2xl font-display font-extrabold text-ink">🎮 Sunshine Learning Games Arcade</h2>
+              <p class="text-xs text-slate-500">Practice coordinate graphing, linear equations, ELA/History vocabulary, and Science concepts!</p>
+            </div>
+            <div class="px-5 py-2.5 rounded-2xl bg-amberwarm-400 text-ink font-display font-extrabold text-sm shadow-sm">
+              🏆 Arcade Score: ${totalGamePts} pts
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            ${[
+              { id: "coord-treasure", label: "💎 Coordinate Treasure Hunt (Math)" },
+              { id: "slope-laser", label: "📈 Slope-Intercept Line Builder (Pre-Algebra)" },
+              { id: "vocab-sprint", label: "📚 ELA & World History Blitz" },
+              { id: "science-lab", label: "🧪 Chemistry & pH Lab Challenge" }
+            ].map(g => `<button type="button" onclick="selectEducationalGame('${g.id}')" class="px-4 py-2.5 rounded-2xl text-xs font-extrabold transition ${activeGameId === g.id ? 'bg-tealhub-500 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-white/80'}">${g.label}</button>`).join("")}
+          </div>
+
+          ${activeGameId === "coord-treasure" ? `
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm grid md:grid-cols-2 gap-6 items-center">
+              <div class="flex justify-center">${buildMiniGrid("guessTreasurePoint", [], false, tr.found ? tr.target : null)}</div>
+              <div class="space-y-4">
+                <span class="px-3 py-1 rounded-full bg-terracotta-500/10 text-terracotta-500 text-xs font-extrabold">Score: ${tr.score} pts • Streak: ${tr.streak}</span>
+                <h3 class="text-xl font-display font-extrabold text-ink">Find the Hidden Gem at <span class="text-tealhub-600 font-mono">(${tr.target.x}, ${tr.target.y})</span></h3>
+                <p class="text-xs text-slate-600">Remember: Move horizontally along the <strong>x-axis</strong> first (${tr.target.x >= 0 ? 'right ' + tr.target.x : 'left ' + Math.abs(tr.target.x)}), then vertically along the <strong>y-axis</strong> (${tr.target.y >= 0 ? 'up ' + tr.target.y : 'down ' + Math.abs(tr.target.y)}).</p>
+                <div class="p-3.5 rounded-2xl bg-slate-50 border text-sm font-bold text-ink">${tr.msg}</div>
+                <button type="button" onclick="nextTreasureRound()" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">New Coordinate Target →</button>
+              </div>
+            </div>
+          ` : ''}
+
+          ${activeGameId === "slope-laser" ? `
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm grid md:grid-cols-2 gap-6 items-center">
+              <div class="flex justify-center">${buildMiniGrid("plotSlopeGamePoint", sl.points, true)}</div>
+              <div class="space-y-4">
+                <span class="px-3 py-1 rounded-full bg-tealhub-500/10 text-tealhub-600 text-xs font-extrabold">Score: ${sl.score} pts • Streak: ${sl.streak}</span>
+                <h3 class="text-xl font-display font-extrabold text-ink">Graph the Linear Equation: <span class="text-terracotta-500 font-mono">y = ${sl.m}x ${sl.b >= 0 ? '+ ' + sl.b : '- ' + Math.abs(sl.b)}</span></h3>
+                <p class="text-xs text-slate-600">Tap <strong>2 points</strong> on the coordinate grid that lie on this line. Tip: Start at the y-intercept <strong>(0, ${sl.b})</strong>, then move up/down by slope <strong>m = ${sl.m}</strong> for each 1 step right!</p>
+                <div class="p-3.5 rounded-2xl bg-slate-50 border text-sm font-bold text-ink">${sl.msg}</div>
+                <div class="flex gap-2">
+                  <button type="button" onclick="gameSession.slope.points=[]; render();" class="px-4 py-2 rounded-xl border text-xs font-bold">↺ Clear Points</button>
+                  <button type="button" onclick="nextSlopeRound()" class="px-5 py-2.5 rounded-xl bg-sage-500 text-white text-xs font-bold">Next Equation →</button>
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          ${activeGameId === "vocab-sprint" ? `
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm max-w-2xl space-y-4">
+              <div class="flex justify-between items-center">
+                <span class="px-3 py-1 rounded-full bg-tealhub-500/10 text-tealhub-600 text-xs font-extrabold">ELA &amp; World History Challenge</span>
+                <span class="text-xs font-extrabold text-sage-700">Score: ${vo.score} pts • Streak: ${vo.streak}</span>
+              </div>
+              <h3 class="text-lg font-display font-extrabold text-ink">${vItem.prompt}</h3>
+              <div class="grid sm:grid-cols-2 gap-2.5">
+                ${vItem.choices.map((c, idx) => `<button type="button" onclick="answerFlashcardGame('vocab', ${idx})" class="p-3.5 rounded-2xl border text-left text-xs font-bold hover:bg-slate-50 transition">${c}</button>`).join("")}
+              </div>
+              ${vo.msg ? `<div class="p-3 rounded-xl bg-amberwarm-50 text-xs font-bold text-ink flex justify-between items-center"><span>${vo.msg}</span><button type="button" onclick="nextFlashcardRound('vocab')" class="px-4 py-1.5 rounded-xl bg-sage-500 text-white">Next →</button></div>` : ''}
+            </div>
+          ` : ''}
+
+          ${activeGameId === "science-lab" ? `
+            <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-sm max-w-2xl space-y-4">
+              <div class="flex justify-between items-center">
+                <span class="px-3 py-1 rounded-full bg-sage-50 text-sage-700 text-xs font-extrabold">Comprehensive Science 3 Lab</span>
+                <span class="text-xs font-extrabold text-sage-700">Score: ${sc.score} pts • Streak: ${sc.streak}</span>
+              </div>
+              <h3 class="text-lg font-display font-extrabold text-ink">${sItem.prompt}</h3>
+              <div class="grid sm:grid-cols-3 gap-2.5">
+                ${sItem.choices.map((c, idx) => `<button type="button" onclick="answerFlashcardGame('science', ${idx})" class="p-3.5 rounded-2xl border text-center text-xs font-bold hover:bg-slate-50 transition">${c}</button>`).join("")}
+              </div>
+              ${sc.msg ? `<div class="p-3 rounded-xl bg-amberwarm-50 text-xs font-bold text-ink flex justify-between items-center"><span>${sc.msg}</span><button type="button" onclick="nextFlashcardRound('science')" class="px-4 py-1.5 rounded-xl bg-sage-500 text-white">Next →</button></div>` : ''}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
     function renderTabResources() {
       return `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">${(appState.resources || []).map(r => `<div class="bg-white rounded-3xl p-6 shadow-sm flex flex-col justify-between"><div><span class="text-[11px] font-bold uppercase px-2.5 py-1 rounded-lg bg-tealhub-500/10 text-tealhub-600">${r.category}</span><h4 class="font-display font-extrabold text-ink mt-3 mb-1.5">${r.title}</h4><p class="text-xs text-slate-600 mb-4">${r.notes || ''}</p></div><a href="${r.url}" target="_blank" class="py-2.5 px-4 rounded-xl bg-tealhub-500 text-white text-xs font-bold text-center">Launch ↗</a></div>`).join("")}</div>`;
     }
@@ -1560,7 +1966,7 @@
               ` : ''}
             ` : ''}
           </div>
-          <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6 shadow-sm"><div class="flex justify-between gap-4 mb-3"><p class="font-semibold"><span class="text-tealhub-600 font-extrabold mr-1">${idx+1}.</span> ${formatMathOption(q.prompt)}</p><span class="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg shrink-0">${isSub ? `${sub.questionScores?.[q.id]??0} / ${q.points} pts` : `${q.points} pts`}</span></div>${q.type==="mcq"?`<div class="space-y-2">${q.options.map((o,oi)=>`<label class="flex items-center gap-3 p-3 rounded-xl border ${isSub && String(oi)===String(q.correctAnswer) ? 'border-emerald-500 bg-emerald-50/50' : ''} cursor-pointer"><input type="radio" name="ans_${q.id}" value="${oi}" ${String(saved[q.id]??"")===String(oi)?'checked':''} ${isSub?'disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>`:q.type==="tf"?`<div class="flex gap-3">${["True","False"].map(v=>`<label class="flex-1 p-3 rounded-xl border flex justify-center gap-2"><input type="radio" name="ans_${q.id}" value="${v}" ${saved[q.id]===v?'checked':''} ${isSub?'disabled':''}/>${v}</label>`).join("")}</div>`:q.type==="fill"?`<input id="ans_${q.id}" value="${(saved[q.id]||"").replace(/"/g,'&quot;')}" ${isSub?'disabled':''} class="w-full px-4 py-2.5 rounded-xl border text-sm"/>`:`<textarea id="ans_${q.id}" rows="4" ${isSub?'disabled':''} class="w-full px-4 py-3 rounded-xl border text-sm">${saved[q.id]||""}</textarea>`}</div>`).join("")}</div>
+          <div class="space-y-4">${asg.questions.map((q, idx) => `<div class="bg-white rounded-3xl p-6 shadow-sm"><div class="flex justify-between gap-4 mb-3"><p class="font-semibold"><span class="text-tealhub-600 font-extrabold mr-1">${idx+1}.</span> ${formatMathOption(q.prompt)}</p><span class="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg shrink-0">${isSub ? `${sub.questionScores?.[q.id]??0} / ${q.points} pts` : `${q.points} pts`}</span></div>${q.type==="mcq"?`<div class="space-y-2">${q.options.map((o,oi)=>`<label class="flex items-center gap-3 p-3 rounded-xl border ${isSub && String(oi)===String(q.correctAnswer) ? 'border-emerald-500 bg-emerald-50/50' : ''} cursor-pointer"><input type="radio" name="ans_${q.id}" value="${oi}" ${String(saved[q.id]??"")===String(oi)?'checked':''} ${isSub?'disabled':''}/><span>${formatMathOption(o)}</span></label>`).join("")}</div>`:q.type==="tf"?`<div class="flex gap-3">${["True","False"].map(v=>`<label class="flex-1 p-3 rounded-xl border flex justify-center gap-2"><input type="radio" name="ans_${q.id}" value="${v}" ${saved[q.id]===v?'checked':''} ${isSub?'disabled':''}/>${v}</label>`).join("")}</div>`:q.type==="graph"?renderInteractiveCoordinateGrid(q.id, isSub ? parseGraphPoints(saved[q.id]) : (studentGraphDrafts[q.id] || []), q.graphMode || "line", isSub, isSub && q.graphMode !== "line" ? parseGraphPoints(q.correctAnswer) : null):q.type==="fill"?`<input id="ans_${q.id}" value="${(saved[q.id]||"").replace(/"/g,'&quot;')}" ${isSub?'disabled':''} class="w-full px-4 py-2.5 rounded-xl border text-sm"/>`:`<textarea id="ans_${q.id}" rows="4" ${isSub?'disabled':''} class="w-full px-4 py-3 rounded-xl border text-sm">${saved[q.id]||""}</textarea>`}</div>`).join("")}</div>
 
           ${(asg.allowProjectLink || reqUp) ? `
             <div class="mt-5 bg-white rounded-3xl p-6 shadow-sm border ${reqUp ? 'border-amberwarm-400' : 'border-white'} space-y-3">
@@ -1747,8 +2153,8 @@
                       <label class="text-amberwarm-600"><input type="checkbox" id="asg_require_upload"/> ⚠️ Require PDF / Work Upload</label>
                       <label class="text-tealhub-600"><input type="checkbox" id="asg_lock_date"/> 📅 Lock Until Due Date</label>
                     </div>
-                    <div class="flex gap-1.5"><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ MCQ</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ T/F</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Fill</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Open</button></div>
-                    ${builderQuestions.map((q, idx) => `<div class="p-4 rounded-xl bg-white border space-y-2"><div class="flex justify-between text-xs font-bold"><span>Q${idx+1} (${q.type})</span><div>Pts: <input type="number" id="bq_pts_${idx}" value="${q.points}" class="w-14 border rounded px-1"/> ${builderQuestions.length>1?`<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 ml-2">✕</button>`:''}</div></div><input id="bq_prompt_${idx}" value="${(q.prompt||'').replace(/"/g,'&quot;')}" placeholder="Question prompt" class="w-full px-3 py-1.5 rounded border text-xs"/>${q.type==='mcq'?`<div class="grid grid-cols-2 gap-2">${[0,1,2,3].map(o=>`<input id="bq_opt_${idx}_${o}" value="${((q.options&&q.options[o])||'').replace(/"/g,'&quot;')}" placeholder="Choice ${o+1}" class="px-2 py-1 rounded border text-xs"/>`).join("")}</div><select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs">${[0,1,2,3].map(o=>`<option value="${o}" ${String(q.correctAnswer)===String(o)?'selected':''}>Choice ${o+1}</option>`).join("")}</select>`:q.type==='tf'?`<select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs"><option value="True" ${q.correctAnswer==='True'?'selected':''}>True</option><option value="False" ${q.correctAnswer==='False'?'selected':''}>False</option></select>`:q.type==='fill'?`<input id="bq_corr_${idx}" value="${(q.correctAnswer||'').replace(/"/g,'&quot;')}" placeholder="Correct answer" class="w-full px-2 py-1 rounded border text-xs"/>`:''}</div>`).join("")}
+                    <div class="flex gap-1.5"><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('mcq')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ MCQ</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('tf')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ T/F</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('fill')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Fill</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('open')" class="px-2.5 py-1 rounded bg-white border text-xs font-bold">+ Open</button><button type="button" onclick="syncBuilderInputsToMemory(); addBuilderQuestion('graph')" class="px-2.5 py-1 rounded bg-tealhub-500 text-white text-xs font-bold">+ Graph</button></div>
+                    ${builderQuestions.map((q, idx) => `<div class="p-4 rounded-xl bg-white border space-y-2"><div class="flex justify-between text-xs font-bold"><span>Q${idx+1} (${q.type})</span><div>Pts: <input type="number" id="bq_pts_${idx}" value="${q.points}" class="w-14 border rounded px-1"/> ${builderQuestions.length>1?`<button type="button" onclick="syncBuilderInputsToMemory(); removeBuilderQuestion(${idx})" class="text-red-500 ml-2">✕</button>`:''}</div></div><input id="bq_prompt_${idx}" value="${(q.prompt||'').replace(/"/g,'&quot;')}" placeholder="Question prompt" class="w-full px-3 py-1.5 rounded border text-xs"/>${q.type==='mcq'?`<div class="grid grid-cols-2 gap-2">${[0,1,2,3].map(o=>`<input id="bq_opt_${idx}_${o}" value="${((q.options&&q.options[o])||'').replace(/"/g,'&quot;')}" placeholder="Choice ${o+1}" class="px-2 py-1 rounded border text-xs"/>`).join("")}</div><select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs">${[0,1,2,3].map(o=>`<option value="${o}" ${String(q.correctAnswer)===String(o)?'selected':''}>Choice ${o+1}</option>`).join("")}</select>`:q.type==='tf'?`<select id="bq_corr_${idx}" class="px-2 py-1 rounded border text-xs"><option value="True" ${q.correctAnswer==='True'?'selected':''}>True</option><option value="False" ${q.correctAnswer==='False'?'selected':''}>False</option></select>`:q.type==='graph'?`<div class="grid sm:grid-cols-2 gap-2"><select id="bq_gmode_${idx}" class="px-2 py-1 rounded border text-xs"><option value="line" ${(q.graphMode||'line')==='line'?'selected':''}>Linear Equation (2 Points on Line)</option><option value="polygon" ${q.graphMode==='polygon'?'selected':''}>Shape / Polygon Vertices</option><option value="points" ${q.graphMode==='points'?'selected':''}>Coordinate Points</option></select><input id="bq_corr_${idx}" value="${(q.correctAnswer||'').replace(/"/g,'&quot;')}" placeholder="Line: m=2,b=-1 | Shape: (1,1),(4,1),(4,4),(1,4)" class="px-2 py-1 rounded border text-xs"/></div>`:q.type==='fill'?`<input id="bq_corr_${idx}" value="${(q.correctAnswer||'').replace(/"/g,'&quot;')}" placeholder="Correct answer" class="w-full px-2 py-1 rounded border text-xs"/>`:''}</div>`).join("")}
                     <button type="submit" class="px-6 py-2.5 rounded-xl bg-sage-500 text-white font-bold text-xs">Save Assignment ✓</button>
                   </form>` : ''}
 
